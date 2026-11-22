@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
+import { CategoriesModule } from './categories/categories.module';
 import { OriginCsrfGuard } from './common/guards/origin-csrf.guard';
 import { HealthModule } from './health/health.module';
 
@@ -19,6 +20,7 @@ import { HealthModule } from './health/health.module';
     ]),
     HealthModule,
     AuthModule,
+    CategoriesModule,
   ],
   providers: [
     {

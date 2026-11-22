@@ -19,6 +19,7 @@ Control estricto y auditable de scripts SQL versionados ejecutados sobre `moneyf
 | `0001` | `0001_init_extensions.sql` | `MF-002` | `2026-11-21` | Ninguna (inicial) | `AD264B6AD0AD14D8A1BEFCF99379BF9FCD6D75FC9BD376873D5402AC861F0EC3` | Aplicada |
 | `0002` | `0002_auth_identity.sql` | `MF-005` | `2026-11-21` | `0001` | `C189582A612BD6FDDD190508FB6681D0E7E0F0F3C039B3047EEF3007F7982082` | Aplicada |
 | `0003` | `0003_financial_core.sql` | `MF-011` | `2026-11-22` | `0002` | `079D04D90F4AFF857F7D76F31DDDDEF164B630933D23C7990F30CB3FB992EF2E` | Aplicada |
+| `0004` | `0004_seed_system_categories.sql` | `MF-012` | `2026-11-22` | `0003` | `A14DDA2DADEFF92405C8B8E86B614230A612BDE2F9FA6C2ECA9E64C70D8083FA` | Aplicada |
 
 ---
 
@@ -92,3 +93,20 @@ Control estricto y auditable de scripts SQL versionados ejecutados sobre `moneyf
   DROP TYPE IF EXISTS public.fund_type;
   DROP TYPE IF EXISTS public.currency_code;
   ```
+
+### `0004_seed_system_categories.sql`
+- **Motivo:** Poblar de forma versionada e idempotente las 14 categorías globales base del sistema (5 `INCOME` y 9 `EXPENSE`) con colores hex `#RRGGBB` sobrios e iconos de Lucide Icons, garantizando `is_system = TRUE`, `user_id = NULL` e `is_archived = FALSE`.
+- **Dependencias:** `0003_financial_core.sql` aplicada (tabla `public.categories` y tipo enum `public.category_kind`).
+- **Comando de ejecución:**
+  ```powershell
+  Get-Content db/migrations/0004_seed_system_categories.sql -Raw | docker exec -i moneyflow-postgres psql -U postgres -d moneyflow_dev -v ON_ERROR_STOP=1
+  ```
+- **Validación:**
+  ```powershell
+  docker exec -i moneyflow-postgres psql -U postgres -d moneyflow_dev -c "SELECT kind, count(*) FROM public.categories WHERE is_system = TRUE AND is_archived = FALSE GROUP BY kind ORDER BY kind;"
+  ```
+- **Rollback:**
+  ```sql
+  DELETE FROM public.categories WHERE is_system = TRUE;
+  ```
+
