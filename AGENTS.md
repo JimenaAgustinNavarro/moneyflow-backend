@@ -50,3 +50,12 @@ npm test -- --silent
 npm run lint
 npm run build
 ```
+
+## Invariantes de Diseño Backend (Obligatorios en `/plan` y Fase 2)
+
+- **Persistencia ante errores dentro de `$transaction`:** Si un caso de error DEBE quedar guardado en PostgreSQL (ej. revocación de sesión por robo, auditoría de intento fallido, registro de fallo), **nunca** lances una excepción dentro de `prisma.$transaction` (haría `ROLLBACK`). Retorna un resultado discriminado desde la transacción para que haga `COMMIT` y lanza `RpcException` fuera de ella.
+- **Orden de operaciones costosas y externas:**
+  - Validar existencia, propiedad (`user_id`), vigencia y estado en BD **antes** de ejecutar operaciones costosas de CPU (como Argon2id).
+  - Ejecutar I/O externo (SMTP, llamadas externas) **fuera** de transacciones Prisma ACID.
+- **Defensa de entrada en parsers nativos:** Todo `new URL(...)`, `JSON.parse(...)` o parseo numérico sobre headers/inputs del cliente debe envolverse en validación controlada que responda `400`/`403`, jamás `500`.
+- **Seguridad con JWT stateless:** En operaciones críticas de cuenta o dinero que ya consultan PostgreSQL (como `change-password` o acciones sensibles de cuenta), verificar explícitamente que el usuario esté activo/verificado y, cuando corresponda, que la sesión siga vigente en `user_sessions`.
