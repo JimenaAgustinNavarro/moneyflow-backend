@@ -27,7 +27,14 @@ describe('LedgerService', () => {
     fund: { findFirst: jest.Mock; findMany: jest.Mock };
     category: { findMany: jest.Mock };
     fundEntry: { aggregate: jest.Mock; create: jest.Mock };
-    financialTransaction: { findFirst: jest.Mock; create: jest.Mock };
+    financialTransaction: {
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      count: jest.Mock;
+      aggregate: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+    };
     transactionSplit: { create: jest.Mock };
     $queryRaw: jest.Mock;
     $transaction: jest.Mock;
@@ -40,7 +47,14 @@ describe('LedgerService', () => {
       fund: { findFirst: jest.fn(), findMany: jest.fn() },
       category: { findMany: jest.fn() },
       fundEntry: { aggregate: jest.fn(), create: jest.fn() },
-      financialTransaction: { findFirst: jest.fn(), create: jest.fn() },
+      financialTransaction: {
+        findFirst: jest.fn(),
+        findMany: jest.fn(),
+        count: jest.fn(),
+        aggregate: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
       transactionSplit: { create: jest.fn() },
       $queryRaw: jest.fn(),
       $transaction: jest.fn(),
@@ -1057,5 +1071,726 @@ describe('LedgerService', () => {
         idempotencyKey: 'idem-adj-1',
       }),
     ).rejects.toMatchObject({ error: { statusCode: 409 } });
+  });
+
+  it('voids an EXPENSE and a TRANSFER with deterministic FOR UPDATE lock, ordered entries/affectedFundBalances, and default reason', async () => {
+    const destFundId = '11111111-2222-4222-8222-222222222222';
+    const voidTxId = '77777777-7777-4777-8777-777777777777';
+
+    // 1) Void EXPENSE with default reason
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([{ id: fundId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'EXPENSE',
+      status: 'POSTED',
+      amount: { toString: () => '120.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      recordedAt: baseNow,
+      description: 'Supermercado',
+      notes: null,
+      categoryId: catExpenseId1,
+      relatedTransactionId: null,
+      idempotencyKey: null,
+      createdAt: baseNow,
+      updatedAt: baseNow,
+      fundEntries: [
+        {
+          id: entryId,
+          fundId,
+          signedAmount: { toString: () => '-120.00' },
+          currency: 'PEN',
+          occurredOn: limaDate,
+          createdAt: baseNow,
+        },
+      ],
+    });
+    prismaMock.financialTransaction.count.mockResolvedValueOnce(0);
+    prismaMock.fund.findMany.mockResolvedValueOnce([
+      {
+        id: fundId,
+        userId: userA,
+        currency: 'PEN',
+        allowNegativeBalance: false,
+        isArchived: false,
+      },
+    ]);
+    prismaMock.fundEntry.aggregate.mockResolvedValueOnce({
+      _sum: { signedAmount: { toString: () => '380.00' } },
+    });
+    prismaMock.financialTransaction.update.mockResolvedValueOnce({ id: txId, status: 'VOIDED' });
+    prismaMock.financialTransaction.create.mockResolvedValueOnce({
+      id: voidTxId,
+      type: 'VOID',
+      status: 'POSTED',
+      amount: { toString: () => '120.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      recordedAt: baseNow,
+      description: 'Anulación: Supermercado',
+      notes: null,
+      categoryId: catExpenseId1,
+      relatedTransactionId: txId,
+      idempotencyKey: null,
+      createdAt: baseNow,
+      updatedAt: baseNow,
+    });
+    prismaMock.fundEntry.create.mockResolvedValueOnce({
+      id: '88888888-1111-4111-8111-111111111111',
+      fundId,
+      signedAmount: { toString: () => '120.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      createdAt: baseNow,
+    });
+
+    const voidedExpense = await service.voidTransaction(contextA, {
+      id: txId.toUpperCase(),
+      occurredOn: '2026-11-22',
+    });
+
+    expect(voidedExpense.originalStatus).toBe('VOIDED');
+    expect(voidedExpense.voidTransaction.description).toBe('Anulación: Supermercado');
+    expect(voidedExpense.voidTransaction.entries[0].signedAmount).toBe('120.00');
+    expect(voidedExpense.affectedFundBalances).toEqual([{ fundId, balanceAfter: '500.00' }]);
+
+    // 2) Void TRANSFER: locks funds sorted ascending, orders VOID entries negative-first and affectedFundBalances by fundId asc
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([{ id: destFundId }, { id: fundId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'TRANSFER',
+      status: 'POSTED',
+      amount: { toString: () => '150.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      recordedAt: baseNow,
+      description: 'Traspaso',
+      notes: null,
+      categoryId: null,
+      relatedTransactionId: null,
+      idempotencyKey: null,
+      createdAt: baseNow,
+      updatedAt: baseNow,
+      fundEntries: [
+        {
+          id: entryId,
+          fundId,
+          signedAmount: { toString: () => '-150.00' },
+          currency: 'PEN',
+          occurredOn: limaDate,
+          createdAt: baseNow,
+        },
+        {
+          id: '99999999-9999-4999-8999-999999999999',
+          fundId: destFundId,
+          signedAmount: { toString: () => '150.00' },
+          currency: 'PEN',
+          occurredOn: limaDate,
+          createdAt: baseNow,
+        },
+      ],
+    });
+    prismaMock.financialTransaction.count.mockResolvedValueOnce(0);
+    prismaMock.fund.findMany.mockResolvedValueOnce([
+      {
+        id: fundId,
+        userId: userA,
+        currency: 'PEN',
+        allowNegativeBalance: false,
+        isArchived: false,
+      },
+      {
+        id: destFundId,
+        userId: userA,
+        currency: 'PEN',
+        allowNegativeBalance: false,
+        isArchived: false,
+      },
+    ]);
+    prismaMock.fundEntry.aggregate
+      .mockResolvedValueOnce({ _sum: { signedAmount: { toString: () => '200.00' } } })
+      .mockResolvedValueOnce({ _sum: { signedAmount: { toString: () => '350.00' } } });
+    prismaMock.financialTransaction.update.mockResolvedValueOnce({ id: txId, status: 'VOIDED' });
+    prismaMock.financialTransaction.create.mockResolvedValueOnce({
+      id: voidTxId,
+      type: 'VOID',
+      status: 'POSTED',
+      amount: { toString: () => '150.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      recordedAt: baseNow,
+      description: 'Reversa traspaso',
+      notes: null,
+      categoryId: null,
+      relatedTransactionId: txId,
+      idempotencyKey: null,
+      createdAt: baseNow,
+      updatedAt: baseNow,
+    });
+    prismaMock.fundEntry.create
+      .mockResolvedValueOnce({
+        id: '88888888-2222-4222-8222-222222222222',
+        fundId,
+        signedAmount: { toString: () => '150.00' },
+        currency: 'PEN',
+        occurredOn: limaDate,
+        createdAt: baseNow,
+      })
+      .mockResolvedValueOnce({
+        id: '88888888-3333-4333-8333-333333333333',
+        fundId: destFundId,
+        signedAmount: { toString: () => '-150.00' },
+        currency: 'PEN',
+        occurredOn: limaDate,
+        createdAt: baseNow,
+      });
+
+    const voidedTransfer = await service.voidTransaction(contextA, {
+      id: txId,
+      reason: 'Reversa traspaso',
+      occurredOn: '2026-11-22',
+    });
+
+    expect(voidedTransfer.voidTransaction.entries.map((e) => e.signedAmount)).toEqual([
+      '-150.00',
+      '150.00',
+    ]);
+    expect(voidedTransfer.affectedFundBalances).toEqual([
+      { fundId: destFundId, balanceAfter: '50.00' },
+      { fundId, balanceAfter: '500.00' },
+    ]);
+  });
+
+  it('rejects invalid VOID cases (missing/cross-user, VOID/REFUND target, already VOIDED, earlier date, has refunds, archived fund, overdraft, P2002, idempotency mismatch)', async () => {
+    // 1) Missing or cross-user -> 404
+    prismaMock.$queryRaw.mockResolvedValueOnce([]);
+    await expect(service.voidTransaction(contextA, { id: txId })).rejects.toMatchObject({
+      error: { statusCode: 404 },
+    });
+
+    // 2) Target is VOID or REFUND -> 400
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ id: txId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'REFUND',
+      status: 'POSTED',
+      occurredOn: limaDate,
+      fundEntries: [],
+    });
+    await expect(service.voidTransaction(contextA, { id: txId })).rejects.toMatchObject({
+      error: { statusCode: 400 },
+    });
+
+    // 3) Already VOIDED -> 409
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ id: txId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'EXPENSE',
+      status: 'VOIDED',
+      occurredOn: limaDate,
+      fundEntries: [],
+    });
+    await expect(service.voidTransaction(contextA, { id: txId })).rejects.toMatchObject({
+      error: { statusCode: 409 },
+    });
+
+    // 4) Chronological coherence: occurredOn earlier than original -> 400
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ id: txId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'EXPENSE',
+      status: 'POSTED',
+      occurredOn: limaDate,
+      fundEntries: [
+        { id: entryId, fundId, signedAmount: { toString: () => '-50.00' }, currency: 'PEN' },
+      ],
+    });
+    await expect(
+      service.voidTransaction(contextA, { id: txId, occurredOn: '2026-11-21' }),
+    ).rejects.toMatchObject({
+      error: {
+        statusCode: 400,
+        message: 'Void date cannot be earlier than original transaction date',
+      },
+    });
+
+    // 5) Has refunds -> 409
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ id: txId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'EXPENSE',
+      status: 'POSTED',
+      occurredOn: limaDate,
+      fundEntries: [
+        { id: entryId, fundId, signedAmount: { toString: () => '-50.00' }, currency: 'PEN' },
+      ],
+    });
+    prismaMock.financialTransaction.count.mockResolvedValueOnce(1);
+    await expect(
+      service.voidTransaction(contextA, { id: txId, occurredOn: '2026-11-22' }),
+    ).rejects.toMatchObject({ error: { statusCode: 409 } });
+
+    // 6) Overdraft when voiding INCOME with allowNegativeBalance=false -> 409
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([{ id: fundId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'INCOME',
+      status: 'POSTED',
+      amount: { toString: () => '200.00' },
+      occurredOn: limaDate,
+      description: 'Ingreso',
+      fundEntries: [
+        { id: entryId, fundId, signedAmount: { toString: () => '200.00' }, currency: 'PEN' },
+      ],
+    });
+    prismaMock.financialTransaction.count.mockResolvedValueOnce(0);
+    prismaMock.fund.findMany.mockResolvedValueOnce([
+      {
+        id: fundId,
+        userId: userA,
+        currency: 'PEN',
+        allowNegativeBalance: false,
+        isArchived: false,
+      },
+    ]);
+    prismaMock.fundEntry.aggregate.mockResolvedValueOnce({
+      _sum: { signedAmount: { toString: () => '150.00' } },
+    });
+    await expect(
+      service.voidTransaction(contextA, { id: txId, occurredOn: '2026-11-22' }),
+    ).rejects.toMatchObject({ error: { statusCode: 409 } });
+
+    // 7) Early idempotency guard rejects mismatched type/target without querying original
+    const findFirstCallsBeforeVoidGuard =
+      prismaMock.financialTransaction.findFirst.mock.calls.length;
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: '77777777-7777-4777-8777-777777777777',
+      type: 'INCOME',
+      relatedTransactionId: null,
+      occurredOn: limaDate,
+      description: 'Otra cosa',
+      notes: null,
+      fundEntries: [],
+      transactionSplits: [],
+    });
+    await expect(
+      service.voidTransaction(contextA, { id: txId, idempotencyKey: 'idem-void-mismatch' }),
+    ).rejects.toMatchObject({ error: { statusCode: 409 } });
+    expect(prismaMock.financialTransaction.findFirst).toHaveBeenCalledTimes(
+      findFirstCallsBeforeVoidGuard + 1,
+    );
+
+    // 8) Concurrent P2002 on single_void_per_related_uidx -> 409
+    prismaMock.$transaction.mockRejectedValueOnce({ code: 'P2002' });
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({ id: 'void-winner-id' });
+    await expect(service.voidTransaction(contextA, { id: txId })).rejects.toMatchObject({
+      error: { statusCode: 409 },
+    });
+  });
+
+  it('records partial REFUNDs, rejects over-refund by 0.01, non-EXPENSE, VOIDED, earlier date, and enforces early idempotency guard', async () => {
+    const refundTxId = '66666666-6666-4666-8666-666666666666';
+
+    // 1) Partial refund 60.00 on 100.00 EXPENSE
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([{ id: fundId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'EXPENSE',
+      status: 'POSTED',
+      amount: { toString: () => '100.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      description: 'Compra',
+      categoryId: catExpenseId1,
+      fundEntries: [
+        { id: entryId, fundId, signedAmount: { toString: () => '-100.00' }, currency: 'PEN' },
+      ],
+    });
+    prismaMock.fund.findFirst.mockResolvedValueOnce({
+      id: fundId,
+      userId: userA,
+      currency: 'PEN',
+      isArchived: false,
+    });
+    prismaMock.financialTransaction.aggregate.mockResolvedValueOnce({
+      _sum: { amount: null },
+    });
+    prismaMock.fundEntry.aggregate.mockResolvedValueOnce({
+      _sum: { signedAmount: { toString: () => '380.00' } },
+    });
+    prismaMock.financialTransaction.create.mockResolvedValueOnce({
+      id: refundTxId,
+      type: 'REFUND',
+      status: 'POSTED',
+      amount: { toString: () => '60.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      recordedAt: baseNow,
+      description: 'Reembolso: Compra',
+      notes: null,
+      categoryId: catExpenseId1,
+      relatedTransactionId: txId,
+      idempotencyKey: null,
+      createdAt: baseNow,
+      updatedAt: baseNow,
+    });
+    prismaMock.fundEntry.create.mockResolvedValueOnce({
+      id: '55555555-5555-4555-8555-555555555555',
+      fundId,
+      signedAmount: { toString: () => '60.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      createdAt: baseNow,
+    });
+
+    const refund1 = await service.refundTransaction(contextA, {
+      id: txId,
+      amount: '60.00',
+      occurredOn: '2026-11-22',
+    });
+    expect(refund1.totalRefundedAfter).toBe('60.00');
+    expect(refund1.remainingRefundableAmount).toBe('40.00');
+    expect(refund1.fundBalanceAfter).toBe('440.00');
+    expect(refund1.refundTransaction.description).toBe('Reembolso: Compra');
+
+    // 2) Second refund 40.01 exceeds remaining 40.00 -> 409
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([{ id: fundId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'EXPENSE',
+      status: 'POSTED',
+      amount: { toString: () => '100.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      description: 'Compra',
+      categoryId: catExpenseId1,
+      fundEntries: [
+        { id: entryId, fundId, signedAmount: { toString: () => '-100.00' }, currency: 'PEN' },
+      ],
+    });
+    prismaMock.fund.findFirst.mockResolvedValueOnce({
+      id: fundId,
+      userId: userA,
+      currency: 'PEN',
+      isArchived: false,
+    });
+    prismaMock.financialTransaction.aggregate.mockResolvedValueOnce({
+      _sum: { amount: { toString: () => '60.00' } },
+    });
+    await expect(
+      service.refundTransaction(contextA, {
+        id: txId,
+        amount: '40.01',
+        occurredOn: '2026-11-22',
+      }),
+    ).rejects.toMatchObject({ error: { statusCode: 409 } });
+
+    // 3) Chronological coherence: occurredOn earlier than original -> 400
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ id: txId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'EXPENSE',
+      status: 'POSTED',
+      amount: { toString: () => '100.00' },
+      occurredOn: limaDate,
+      fundEntries: [{ id: entryId, fundId }],
+    });
+    await expect(
+      service.refundTransaction(contextA, {
+        id: txId,
+        amount: '10.00',
+        occurredOn: '2026-11-21',
+      }),
+    ).rejects.toMatchObject({
+      error: {
+        statusCode: 400,
+        message: 'Refund date cannot be earlier than original transaction date',
+      },
+    });
+
+    // 4) Non-EXPENSE -> 400; VOIDED -> 409
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ id: txId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'INCOME',
+      status: 'POSTED',
+      occurredOn: limaDate,
+      fundEntries: [{ id: entryId, fundId }],
+    });
+    await expect(
+      service.refundTransaction(contextA, { id: txId, amount: '10.00' }),
+    ).rejects.toMatchObject({ error: { statusCode: 400 } });
+
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ id: txId }]);
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'EXPENSE',
+      status: 'VOIDED',
+      occurredOn: limaDate,
+      fundEntries: [{ id: entryId, fundId }],
+    });
+    await expect(
+      service.refundTransaction(contextA, { id: txId, amount: '10.00' }),
+    ).rejects.toMatchObject({ error: { statusCode: 409 } });
+
+    // 5) Early idempotency guard when type or relatedTransactionId differs
+    const findFirstCallsBeforeRefundGuard =
+      prismaMock.financialTransaction.findFirst.mock.calls.length;
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: refundTxId,
+      type: 'REFUND',
+      relatedTransactionId: '99999999-9999-4999-8999-999999999999',
+      occurredOn: limaDate,
+      description: 'Reembolso',
+      notes: null,
+      fundEntries: [],
+      transactionSplits: [],
+    });
+    await expect(
+      service.refundTransaction(contextA, {
+        id: txId,
+        amount: '10.00',
+        idempotencyKey: 'idem-refund-mismatch',
+      }),
+    ).rejects.toMatchObject({ error: { statusCode: 409 } });
+    expect(prismaMock.financialTransaction.findFirst).toHaveBeenCalledTimes(
+      findFirstCallsBeforeRefundGuard + 1,
+    );
+  });
+
+  it('lists transactions with userId isolation, split-aware categoryId filter, date range, search, and pagination', async () => {
+    prismaMock.financialTransaction.count.mockResolvedValueOnce(1);
+    prismaMock.financialTransaction.findMany.mockResolvedValueOnce([
+      {
+        id: txId,
+        type: 'EXPENSE',
+        status: 'POSTED',
+        amount: { toString: () => '120.00' },
+        currency: 'PEN',
+        occurredOn: limaDate,
+        recordedAt: baseNow,
+        description: 'Supermercado',
+        notes: 'Compra semanal',
+        categoryId: null,
+        relatedTransactionId: null,
+        idempotencyKey: null,
+        createdAt: baseNow,
+        updatedAt: baseNow,
+        fundEntries: [
+          {
+            id: entryId,
+            fundId,
+            signedAmount: { toString: () => '-120.00' },
+            currency: 'PEN',
+            occurredOn: limaDate,
+            createdAt: baseNow,
+          },
+        ],
+        transactionSplits: [
+          {
+            id: splitId1,
+            categoryId: catExpenseId1,
+            amount: { toString: () => '80.00' },
+            note: 'Alimentos',
+            createdAt: baseNow,
+          },
+          {
+            id: splitId2,
+            categoryId: catExpenseId2,
+            amount: { toString: () => '40.00' },
+            note: null,
+            createdAt: baseNow,
+          },
+        ],
+      },
+    ]);
+
+    const res = await service.listTransactions(contextA, {
+      page: 1,
+      limit: 10,
+      fundId: fundId.toUpperCase(),
+      categoryId: catExpenseId2.toUpperCase(),
+      type: 'EXPENSE',
+      status: 'POSTED',
+      currency: 'PEN',
+      fromDate: '2026-11-01',
+      toDate: '2026-11-22',
+      search: '  super  ',
+    });
+
+    expect(res.total).toBe(1);
+    expect(res.totalPages).toBe(1);
+    expect(res.items[0].splits).toHaveLength(2);
+    const findManyCalls = prismaMock.financialTransaction.findMany.mock.calls as Array<
+      [{ where: Record<string, unknown>; orderBy: unknown[] }]
+    >;
+    const findManyArg = findManyCalls[0][0];
+    expect(findManyArg.where.userId).toBe(userA);
+    expect(findManyArg.where.fundEntries).toEqual({
+      some: { userId: userA, fundId },
+    });
+    expect(findManyArg.orderBy).toEqual([
+      { occurredOn: 'desc' },
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ]);
+
+    await expect(
+      service.listTransactions(contextA, {
+        fromDate: '2026-11-25',
+        toDate: '2026-11-10',
+      }),
+    ).rejects.toMatchObject({ error: { statusCode: 400 } });
+  });
+
+  it('computes monthly summary with America/Lima night default, leap-year bounds, multi-currency separation, split deduplication, empty month, and fundId isolation', async () => {
+    // 1) Night window 2026-12-01T02:30:00.000Z === 2026-11-30 21:30 America/Lima -> defaults to "2026-11" and returns currencies: [] when empty
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-12-01T02:30:00.000Z'));
+    prismaMock.financialTransaction.findMany.mockResolvedValueOnce([]);
+
+    const emptySummary = await service.getMonthlySummary(contextA, {});
+    expect(emptySummary).toEqual({
+      month: '2026-11',
+      fromDate: '2026-11-01',
+      toDate: '2026-11-30',
+      fundId: null,
+      currencies: [],
+    });
+    jest.useRealTimers();
+
+    // 2) Leap year 2024-02 -> 2024-02-01..2024-02-29 vs non-leap 2026-02 -> 2026-02-01..2026-02-28
+    prismaMock.financialTransaction.findMany.mockResolvedValueOnce([]);
+    const leap = await service.getMonthlySummary(contextA, { month: '2024-02' });
+    expect(leap.fromDate).toBe('2024-02-01');
+    expect(leap.toDate).toBe('2024-02-29');
+
+    prismaMock.financialTransaction.findMany.mockResolvedValueOnce([]);
+    const nonLeap = await service.getMonthlySummary(contextA, { month: '2026-02' });
+    expect(nonLeap.fromDate).toBe('2026-02-01');
+    expect(nonLeap.toDate).toBe('2026-02-28');
+
+    // 3) Cross-user fundId -> 404
+    prismaMock.fund.findFirst.mockResolvedValueOnce(null);
+    await expect(
+      service.getMonthlySummary(contextA, { month: '2026-11', fundId }),
+    ).rejects.toMatchObject({ error: { statusCode: 404 } });
+
+    // 4) Multi-currency (PEN & USD) with splits (no double count) and REFUND subtracted in net
+    prismaMock.fund.findFirst.mockResolvedValueOnce({ id: fundId });
+    prismaMock.financialTransaction.findMany.mockResolvedValueOnce([
+      {
+        id: 'tx-1',
+        type: 'INCOME',
+        amount: { toString: () => '3000.00' },
+        currency: 'PEN',
+        category: {
+          id: catIncomeId,
+          name: 'Sueldo',
+          kind: 'INCOME',
+          color: '#10B981',
+          icon: 'wallet',
+        },
+        transactionSplits: [],
+      },
+      {
+        id: 'tx-2',
+        type: 'EXPENSE',
+        amount: { toString: () => '120.00' },
+        currency: 'PEN',
+        category: null,
+        transactionSplits: [
+          {
+            amount: { toString: () => '80.00' },
+            category: {
+              id: catExpenseId1,
+              name: 'Alimentos',
+              kind: 'EXPENSE',
+              color: null,
+              icon: null,
+            },
+          },
+          {
+            amount: { toString: () => '40.00' },
+            category: {
+              id: catExpenseId2,
+              name: 'Limpieza',
+              kind: 'EXPENSE',
+              color: null,
+              icon: null,
+            },
+          },
+        ],
+      },
+      {
+        id: 'tx-3',
+        type: 'REFUND',
+        amount: { toString: () => '20.00' },
+        currency: 'PEN',
+        category: {
+          id: catExpenseId1,
+          name: 'Alimentos',
+          kind: 'EXPENSE',
+          color: null,
+          icon: null,
+        },
+        transactionSplits: [],
+      },
+      {
+        id: 'tx-4',
+        type: 'INCOME',
+        amount: { toString: () => '500.00' },
+        currency: 'USD',
+        category: {
+          id: catIncomeId,
+          name: 'Sueldo',
+          kind: 'INCOME',
+          color: '#10B981',
+          icon: 'wallet',
+        },
+        transactionSplits: [],
+      },
+    ]);
+
+    const summary = await service.getMonthlySummary(contextA, {
+      month: '2026-11',
+      fundId: fundId.toUpperCase(),
+    });
+
+    expect(summary.fundId).toBe(fundId);
+    expect(summary.currencies).toHaveLength(2);
+    expect(summary.currencies[0]).toMatchObject({
+      currency: 'PEN',
+      totalIncome: '3000.00',
+      totalExpenseGross: '120.00',
+      totalRefunds: '20.00',
+      totalExpenseNet: '100.00',
+      netCashFlow: '2900.00',
+      transactionCount: 3,
+    });
+    expect(summary.currencies[0].byCategory.map((c) => [c.categoryName, c.totalAmount])).toEqual([
+      ['Sueldo', '3000.00'],
+      ['Alimentos', '80.00'],
+      ['Limpieza', '40.00'],
+    ]);
+    expect(summary.currencies[1]).toMatchObject({
+      currency: 'USD',
+      totalIncome: '500.00',
+      totalExpenseGross: '0.00',
+      totalRefunds: '0.00',
+      totalExpenseNet: '0.00',
+      netCashFlow: '500.00',
+      transactionCount: 1,
+    });
   });
 });

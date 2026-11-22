@@ -535,4 +535,240 @@ describe('LedgerController (HTTP boundary)', () => {
       { requestId: 'req-ledger-1', userId },
     );
   });
+
+  it('validates POST /api/v1/transactions/:id/void (ParseUUIDPipe, CSRF, DTO, Idempotency-Key) and forwards payload', async () => {
+    const accessToken = await authJwtService.signAccessToken(userId, sessionId);
+    coreTcpClientMock.send.mockResolvedValue({
+      voidTransaction: { id: txId, type: 'VOID' },
+      originalTransactionId: txId,
+      originalStatus: 'VOIDED',
+      affectedFundBalances: [{ fundId, balanceAfter: '500.00' }],
+    });
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/transactions/${txId}/void`)
+      .set('Origin', 'http://evil.example.com')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .send({})
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/transactions/not-a-uuid/void')
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .send({})
+      .expect(400);
+
+    const invalidBodies: Array<Record<string, unknown>> = [
+      { reason: '   ' },
+      { occurredOn: '2026-02-31' },
+      { notes: 123 },
+      { userId: '99999999-9999-4999-8999-999999999999' },
+    ];
+    for (const body of invalidBodies) {
+      await request(app.getHttpServer())
+        .post(`/api/v1/transactions/${txId}/void`)
+        .set('Origin', 'http://localhost:3001')
+        .set('Cookie', [`mf_access_token=${accessToken}`])
+        .send(body)
+        .expect(400);
+    }
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/transactions/${txId}/void`)
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .set('Idempotency-Key', '   ')
+      .send({})
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/transactions/${txId}/void`)
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .set('Idempotency-Key', '  void-key-1  ')
+      .send({
+        reason: '  Error de digitación  ',
+        occurredOn: '2026-11-22',
+        notes: '   ',
+      })
+      .expect(201);
+
+    expect(coreTcpClientMock.send).toHaveBeenCalledWith(
+      LEDGER_PATTERNS.VOID_TRANSACTION,
+      {
+        id: txId,
+        reason: 'Error de digitación',
+        occurredOn: '2026-11-22',
+        notes: null,
+        idempotencyKey: 'void-key-1',
+      },
+      { requestId: 'req-ledger-1', userId },
+    );
+  });
+
+  it('validates POST /api/v1/transactions/:id/refund and forwards valid payload', async () => {
+    const accessToken = await authJwtService.signAccessToken(userId, sessionId);
+    coreTcpClientMock.send.mockResolvedValue({
+      refundTransaction: { id: txId, type: 'REFUND' },
+      originalTransactionId: txId,
+      totalRefundedAfter: '60.00',
+      remainingRefundableAmount: '40.00',
+      fundBalanceAfter: '440.00',
+    });
+
+    await request(app.getHttpServer())
+      .post('/api/v1/transactions/not-a-uuid/refund')
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .send({ amount: '60.00' })
+      .expect(400);
+
+    const invalidBodies: Array<Record<string, unknown>> = [
+      {},
+      { amount: '0.00' },
+      { amount: '-10.00' },
+      { amount: '60.00', occurredOn: '2026-02-31' },
+      { amount: '60.00', description: '   ' },
+      { amount: '60.00', extraField: true },
+    ];
+    for (const body of invalidBodies) {
+      await request(app.getHttpServer())
+        .post(`/api/v1/transactions/${txId}/refund`)
+        .set('Origin', 'http://localhost:3001')
+        .set('Cookie', [`mf_access_token=${accessToken}`])
+        .send(body)
+        .expect(400);
+    }
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/transactions/${txId}/refund`)
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .set('Idempotency-Key', 'refund-key-1')
+      .send({
+        amount: '60.00',
+        occurredOn: '2026-11-22',
+        description: '  Devolución parcial  ',
+        notes: '  Nota  ',
+      })
+      .expect(201);
+
+    expect(coreTcpClientMock.send).toHaveBeenCalledWith(
+      LEDGER_PATTERNS.REFUND_TRANSACTION,
+      {
+        id: txId,
+        amount: '60.00',
+        occurredOn: '2026-11-22',
+        description: 'Devolución parcial',
+        notes: 'Nota',
+        idempotencyKey: 'refund-key-1',
+      },
+      { requestId: 'req-ledger-1', userId },
+    );
+  });
+
+  it('validates GET /api/v1/transactions query filters (bounds, date range, non-whitelisted) and forwards', async () => {
+    const accessToken = await authJwtService.signAccessToken(userId, sessionId);
+    coreTcpClientMock.send.mockResolvedValue({
+      items: [],
+      page: 1,
+      limit: 20,
+      total: 0,
+      totalPages: 0,
+    });
+
+    const invalidQueries = [
+      'page=0',
+      'page=1.5',
+      'limit=0',
+      'limit=101',
+      'limit=abc',
+      'fundId=bad-uuid',
+      'categoryId=bad-uuid',
+      'type=UNKNOWN',
+      'status=PENDING',
+      'currency=EUR',
+      'fromDate=2026-02-31',
+      'fromDate=2026-11-25&toDate=2026-11-10',
+      'search=%20%20%20',
+      'userId=11111111-1111-4111-8111-111111111111',
+    ];
+
+    for (const qs of invalidQueries) {
+      await request(app.getHttpServer())
+        .get(`/api/v1/transactions?${qs}`)
+        .set('Cookie', [`mf_access_token=${accessToken}`])
+        .expect(400);
+    }
+
+    await request(app.getHttpServer())
+      .get(
+        `/api/v1/transactions?page=2&limit=50&fundId=${fundId}&categoryId=${catId1}&type=EXPENSE&status=POSTED&currency=PEN&fromDate=2026-11-01&toDate=2026-11-22&search=%20super%20`,
+      )
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .expect(200);
+
+    expect(coreTcpClientMock.send).toHaveBeenCalledWith(
+      LEDGER_PATTERNS.LIST_TRANSACTIONS,
+      {
+        page: 2,
+        limit: 50,
+        fundId,
+        categoryId: catId1,
+        type: 'EXPENSE',
+        status: 'POSTED',
+        currency: 'PEN',
+        fromDate: '2026-11-01',
+        toDate: '2026-11-22',
+        search: 'super',
+      },
+      { requestId: 'req-ledger-1', userId },
+    );
+  });
+
+  it('routes GET /api/v1/transactions/summary/monthly before :id and validates month and fundId', async () => {
+    const accessToken = await authJwtService.signAccessToken(userId, sessionId);
+    coreTcpClientMock.send.mockResolvedValue({
+      month: '2026-11',
+      fromDate: '2026-11-01',
+      toDate: '2026-11-30',
+      fundId: null,
+      currencies: [],
+    });
+
+    await request(app.getHttpServer())
+      .get('/api/v1/transactions/summary/monthly?month=2026-13')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/transactions/summary/monthly?month=2026-11-01')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/transactions/summary/monthly?fundId=not-a-uuid')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/transactions/summary/monthly?extra=1')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/transactions/summary/monthly?month=2026-11&fundId=${fundId}`)
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .expect(200);
+
+    expect(coreTcpClientMock.send).toHaveBeenCalledWith(
+      LEDGER_PATTERNS.GET_MONTHLY_SUMMARY,
+      {
+        month: '2026-11',
+        fundId,
+      },
+      { requestId: 'req-ledger-1', userId },
+    );
+  });
 });

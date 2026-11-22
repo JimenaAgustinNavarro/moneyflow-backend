@@ -3,14 +3,23 @@ import { RpcException } from '@nestjs/microservices';
 import {
   addMoney,
   AdjustmentDirection,
+  AffectedFundBalanceView,
+  CategoryKindUnion,
+  CategoryMonthlySummaryItemView,
+  CurrencyMonthlySummaryView,
   formatMoney,
   FundCurrencyCode,
   FundEntryView,
+  getLimaCurrentMonth,
   getLimaToday,
+  GetMonthlySummaryTcpPayload,
   GetTransactionByIdTcpPayload,
   GetTransactionResponse,
   InternalAuthContext,
   isValidGregorianDate,
+  ListTransactionsResponse,
+  ListTransactionsTcpPayload,
+  MonthlySummaryResponse,
   parseMoney,
   RecordableTransactionType,
   RecordAdjustmentResponse,
@@ -19,23 +28,44 @@ import {
   RecordTransactionTcpPayload,
   RecordTransferResponse,
   RecordTransferTcpPayload,
+  RefundTransactionResponse,
+  RefundTransactionTcpPayload,
   subMoney,
   TransactionDetailView,
   TransactionSplitInput,
   TransactionSplitView,
   TransactionStatusValue,
   TransactionTypeValue,
+  VoidTransactionResponse,
+  VoidTransactionTcpPayload,
 } from '@app/shared';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const MAX_DECIMAL_14_2 = '999999999999.99';
 const POSITIVE_MONEY_REGEX = /^\d{1,12}(\.\d{1,2})?$/;
+const YEAR_MONTH_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
 const MAX_DESCRIPTION_LENGTH = 200;
 const MAX_NOTES_LENGTH = 500;
 const MAX_SPLIT_NOTE_LENGTH = 200;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
 const MAX_SPLITS_COUNT = 50;
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+const MAX_SEARCH_LENGTH = 100;
+const VALID_TRANSACTION_TYPES: readonly TransactionTypeValue[] = [
+  'INCOME',
+  'EXPENSE',
+  'TRANSFER',
+  'ADJUSTMENT',
+  'VOID',
+  'REFUND',
+];
+const VALID_TRANSACTION_STATUSES: readonly TransactionStatusValue[] = ['POSTED', 'VOIDED'];
+const VALID_CURRENCIES: readonly FundCurrencyCode[] = ['PEN', 'USD'];
+const CURRENCY_ORDER: Record<FundCurrencyCode, number> = { PEN: 0, USD: 1 };
+const CATEGORY_KIND_ORDER: Record<CategoryKindUnion, number> = { INCOME: 0, EXPENSE: 1 };
 
 interface DecimalLike {
   toString(): string;
@@ -113,6 +143,63 @@ interface NormalizedAdjustmentRequest {
   description: string;
   notes: string | null;
   idempotencyKey: string | null;
+}
+
+interface NormalizedVoidRequest {
+  id: string;
+  reason: string | null;
+  occurredOn: string;
+  notes: string | null;
+  idempotencyKey: string | null;
+}
+
+interface NormalizedRefundRequest {
+  id: string;
+  amount: string;
+  occurredOn: string;
+  description: string | null;
+  notes: string | null;
+  idempotencyKey: string | null;
+}
+
+interface NormalizedListTransactionsRequest {
+  page: number;
+  limit: number;
+  fundId?: string;
+  categoryId?: string;
+  type?: TransactionTypeValue;
+  status?: TransactionStatusValue;
+  currency?: FundCurrencyCode;
+  fromDate?: string;
+  toDate?: string;
+  search?: string;
+}
+
+interface NormalizedMonthlySummaryRequest {
+  month: string;
+  fromDate: string;
+  toDate: string;
+  fundId?: string;
+}
+
+interface CategorySummaryMeta {
+  id: string;
+  name: string;
+  kind: CategoryKindUnion;
+  color: string | null;
+  icon: string | null;
+}
+
+interface MonthlySummaryTransactionProjection {
+  id: string;
+  type: TransactionTypeValue;
+  amount: DecimalLike;
+  currency: FundCurrencyCode;
+  category: CategorySummaryMeta | null;
+  transactionSplits: Array<{
+    amount: DecimalLike;
+    category: CategorySummaryMeta;
+  }>;
 }
 
 function buildBadRequestRpc(message: string): RpcException {
@@ -305,13 +392,16 @@ function normalizeRecordPayload(payload: RecordTransactionTcpPayload): Normalize
 
   return {
     type: payload.type,
-    fundId: payload.fundId,
+    fundId: payload.fundId.trim().toLowerCase(),
     amount: formattedAmount,
     occurredOn,
     description: trimmedDescription,
     notes: normalizedNotes,
-    categoryId: normalizedCategoryId,
-    splits: normalizedSplits,
+    categoryId: normalizedCategoryId !== null ? normalizedCategoryId.trim().toLowerCase() : null,
+    splits: normalizedSplits.map((split) => ({
+      ...split,
+      categoryId: split.categoryId.trim().toLowerCase(),
+    })),
     idempotencyKey: normalizedIdempotencyKey,
   };
 }
@@ -600,17 +690,18 @@ function isIdempotentAdjustmentEquivalent(
 
 function toTransactionDetailView(txRecord: TransactionDbProjection): TransactionDetailView {
   const mappedEntries = txRecord.fundEntries.map(toFundEntryView);
-  const entries =
-    txRecord.type === 'TRANSFER'
-      ? [...mappedEntries].sort((left, right) => {
-          const leftNegative = parseMoney(left.signedAmount).isNegative();
-          const rightNegative = parseMoney(right.signedAmount).isNegative();
-          if (leftNegative === rightNegative) {
-            return 0;
-          }
-          return leftNegative ? -1 : 1;
-        })
-      : mappedEntries;
+  const shouldSortBySign =
+    txRecord.type === 'TRANSFER' || (txRecord.type === 'VOID' && mappedEntries.length === 2);
+  const entries = shouldSortBySign
+    ? [...mappedEntries].sort((left, right) => {
+        const leftNegative = parseMoney(left.signedAmount).isNegative();
+        const rightNegative = parseMoney(right.signedAmount).isNegative();
+        if (leftNegative === rightNegative) {
+          return 0;
+        }
+        return leftNegative ? -1 : 1;
+      })
+    : mappedEntries;
 
   return {
     id: txRecord.id,
@@ -629,6 +720,218 @@ function toTransactionDetailView(txRecord: TransactionDbProjection): Transaction
     updatedAt: txRecord.updatedAt.toISOString(),
     entries,
     splits: txRecord.transactionSplits.map(toTransactionSplitView),
+  };
+}
+
+function normalizeOptionalIdempotencyKey(raw: unknown): string | null {
+  if (raw === undefined) {
+    return null;
+  }
+  if (typeof raw !== 'string') {
+    throw buildBadRequestRpc('Idempotency-Key must be a string');
+  }
+  const trimmedKey = raw.trim();
+  if (trimmedKey.length === 0 || trimmedKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+    throw buildBadRequestRpc('Idempotency-Key must be between 1 and 128 characters');
+  }
+  return trimmedKey;
+}
+
+function normalizeOptionalOccurredOn(raw: unknown): string {
+  if (raw === undefined) {
+    return getLimaToday();
+  }
+  if (typeof raw !== 'string' || !isValidGregorianDate(raw)) {
+    throw buildBadRequestRpc(
+      'occurredOn must be a valid Gregorian calendar date in YYYY-MM-DD format',
+    );
+  }
+  return raw;
+}
+
+function normalizeRequiredUuidString(raw: unknown, fieldName: string): string {
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    throw buildBadRequestRpc(`${fieldName} is required`);
+  }
+  return raw.trim().toLowerCase();
+}
+
+function buildDefaultPrefixedDescription(
+  prefix: 'Anulación' | 'Reembolso',
+  originalDescription: string,
+): string {
+  return `${prefix}: ${originalDescription}`.slice(0, MAX_DESCRIPTION_LENGTH).trim();
+}
+
+function normalizeVoidPayload(payload: VoidTransactionTcpPayload): NormalizedVoidRequest {
+  const id = normalizeRequiredUuidString(payload.id, 'id');
+  const occurredOn = normalizeOptionalOccurredOn(payload.occurredOn);
+
+  let reason: string | null = null;
+  if (payload.reason !== undefined) {
+    if (typeof payload.reason !== 'string') {
+      throw buildBadRequestRpc('Invalid reason');
+    }
+    const trimmedReason = payload.reason.trim();
+    if (trimmedReason.length === 0 || trimmedReason.length > MAX_DESCRIPTION_LENGTH) {
+      throw buildBadRequestRpc('Invalid reason');
+    }
+    reason = trimmedReason;
+  }
+
+  const notes = normalizeOptionalNote(payload.notes, MAX_NOTES_LENGTH, 'notes');
+  const idempotencyKey = normalizeOptionalIdempotencyKey(payload.idempotencyKey);
+
+  return {
+    id,
+    reason,
+    occurredOn,
+    notes,
+    idempotencyKey,
+  };
+}
+
+function normalizeRefundPayload(payload: RefundTransactionTcpPayload): NormalizedRefundRequest {
+  const id = normalizeRequiredUuidString(payload.id, 'id');
+  const amount = validateAndFormatPositiveAmount(payload.amount, 'amount');
+  const occurredOn = normalizeOptionalOccurredOn(payload.occurredOn);
+
+  let description: string | null = null;
+  if (payload.description !== undefined) {
+    if (typeof payload.description !== 'string') {
+      throw buildBadRequestRpc('Invalid description');
+    }
+    const trimmedDescription = payload.description.trim();
+    if (trimmedDescription.length === 0 || trimmedDescription.length > MAX_DESCRIPTION_LENGTH) {
+      throw buildBadRequestRpc('Invalid description');
+    }
+    description = trimmedDescription;
+  }
+
+  const notes = normalizeOptionalNote(payload.notes, MAX_NOTES_LENGTH, 'notes');
+  const idempotencyKey = normalizeOptionalIdempotencyKey(payload.idempotencyKey);
+
+  return {
+    id,
+    amount,
+    occurredOn,
+    description,
+    notes,
+    idempotencyKey,
+  };
+}
+
+function normalizeListTransactionsPayload(
+  payload: ListTransactionsTcpPayload,
+): NormalizedListTransactionsRequest {
+  const page = payload.page ?? DEFAULT_PAGE;
+  if (!Number.isInteger(page) || page < 1) {
+    throw buildBadRequestRpc('page must be a positive integer');
+  }
+
+  const limit = payload.limit ?? DEFAULT_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+    throw buildBadRequestRpc(`limit must be an integer between 1 and ${MAX_LIMIT}`);
+  }
+
+  let fundId: string | undefined;
+  if (payload.fundId !== undefined) {
+    fundId = normalizeRequiredUuidString(payload.fundId, 'fundId');
+  }
+
+  let categoryId: string | undefined;
+  if (payload.categoryId !== undefined) {
+    categoryId = normalizeRequiredUuidString(payload.categoryId, 'categoryId');
+  }
+
+  if (payload.type !== undefined && !VALID_TRANSACTION_TYPES.includes(payload.type)) {
+    throw buildBadRequestRpc('Invalid transaction type');
+  }
+
+  if (payload.status !== undefined && !VALID_TRANSACTION_STATUSES.includes(payload.status)) {
+    throw buildBadRequestRpc('Invalid transaction status');
+  }
+
+  if (payload.currency !== undefined && !VALID_CURRENCIES.includes(payload.currency)) {
+    throw buildBadRequestRpc('Invalid currency');
+  }
+
+  if (payload.fromDate !== undefined && !isValidGregorianDate(payload.fromDate)) {
+    throw buildBadRequestRpc(
+      'fromDate must be a valid Gregorian calendar date in YYYY-MM-DD format',
+    );
+  }
+
+  if (payload.toDate !== undefined && !isValidGregorianDate(payload.toDate)) {
+    throw buildBadRequestRpc('toDate must be a valid Gregorian calendar date in YYYY-MM-DD format');
+  }
+
+  if (
+    payload.fromDate !== undefined &&
+    payload.toDate !== undefined &&
+    payload.fromDate > payload.toDate
+  ) {
+    throw buildBadRequestRpc('fromDate must be less than or equal to toDate');
+  }
+
+  let search: string | undefined;
+  if (payload.search !== undefined) {
+    if (typeof payload.search !== 'string') {
+      throw buildBadRequestRpc('search must be a string');
+    }
+    const trimmedSearch = payload.search.trim();
+    if (trimmedSearch.length === 0 || trimmedSearch.length > MAX_SEARCH_LENGTH) {
+      throw buildBadRequestRpc(`search must be between 1 and ${MAX_SEARCH_LENGTH} characters`);
+    }
+    search = trimmedSearch;
+  }
+
+  return {
+    page,
+    limit,
+    ...(fundId !== undefined ? { fundId } : {}),
+    ...(categoryId !== undefined ? { categoryId } : {}),
+    ...(payload.type !== undefined ? { type: payload.type } : {}),
+    ...(payload.status !== undefined ? { status: payload.status } : {}),
+    ...(payload.currency !== undefined ? { currency: payload.currency } : {}),
+    ...(payload.fromDate !== undefined ? { fromDate: payload.fromDate } : {}),
+    ...(payload.toDate !== undefined ? { toDate: payload.toDate } : {}),
+    ...(search !== undefined ? { search } : {}),
+  };
+}
+
+function getGregorianMonthDateBounds(monthStr: string): { fromDate: string; toDate: string } {
+  const [yearPart, monthPart] = monthStr.split('-');
+  const year = Number(yearPart);
+  const month = Number(monthPart);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const dayPart = String(lastDay).padStart(2, '0');
+  return {
+    fromDate: `${monthStr}-01`,
+    toDate: `${monthStr}-${dayPart}`,
+  };
+}
+
+function normalizeMonthlySummaryPayload(
+  payload: GetMonthlySummaryTcpPayload,
+): NormalizedMonthlySummaryRequest {
+  const month = payload.month !== undefined ? payload.month.trim() : getLimaCurrentMonth();
+  if (!YEAR_MONTH_REGEX.test(month)) {
+    throw buildBadRequestRpc('month must be in YYYY-MM format');
+  }
+
+  const { fromDate, toDate } = getGregorianMonthDateBounds(month);
+
+  let fundId: string | undefined;
+  if (payload.fundId !== undefined) {
+    fundId = normalizeRequiredUuidString(payload.fundId, 'fundId');
+  }
+
+  return {
+    month,
+    fromDate,
+    toDate,
+    ...(fundId !== undefined ? { fundId } : {}),
   };
 }
 
@@ -883,10 +1186,11 @@ export class LedgerService {
     payload: GetTransactionByIdTcpPayload,
   ): Promise<GetTransactionResponse> {
     const userId = requireAuthenticatedUserId(context);
+    const id = normalizeRequiredUuidString(payload.id, 'id');
 
     const txRecord = await this.prisma.financialTransaction.findFirst({
       where: {
-        id: payload.id,
+        id,
         userId,
       },
       include: {
@@ -1208,5 +1512,817 @@ export class LedgerService {
 
       throw error;
     }
+  }
+
+  private async resolveIdempotentVoidResponse(
+    db: PrismaService | Prisma.TransactionClient,
+    userId: string,
+    existing: TransactionDbProjection,
+    normalized: NormalizedVoidRequest,
+  ): Promise<VoidTransactionResponse> {
+    if (
+      existing.type !== 'VOID' ||
+      existing.relatedTransactionId === null ||
+      existing.relatedTransactionId.toLowerCase() !== normalized.id
+    ) {
+      throw buildConflictRpc('Idempotency key already used with different request parameters');
+    }
+
+    const original = await db.financialTransaction.findFirst({
+      where: {
+        id: normalized.id,
+        userId,
+      },
+      select: {
+        id: true,
+        description: true,
+      },
+    });
+
+    if (!original) {
+      throw buildConflictRpc('Idempotency key already used with different request parameters');
+    }
+
+    const expectedDescription =
+      normalized.reason ?? buildDefaultPrefixedDescription('Anulación', original.description);
+
+    if (
+      formatDbCalendarDate(existing.occurredOn) !== normalized.occurredOn ||
+      existing.description !== expectedDescription ||
+      (existing.notes ?? null) !== normalized.notes
+    ) {
+      throw buildConflictRpc('Idempotency key already used with different request parameters');
+    }
+
+    const uniqueFundIds = Array.from(
+      new Set(existing.fundEntries.map((entry) => entry.fundId.toLowerCase())),
+    ).sort();
+
+    const affectedFundBalances: AffectedFundBalanceView[] = await Promise.all(
+      uniqueFundIds.map(async (fundId) => ({
+        fundId,
+        balanceAfter: await this.getFundBalance(db, userId, fundId),
+      })),
+    );
+
+    return {
+      voidTransaction: toTransactionDetailView(existing),
+      originalTransactionId: original.id,
+      originalStatus: 'VOIDED',
+      affectedFundBalances,
+    };
+  }
+
+  async voidTransaction(
+    context: InternalAuthContext,
+    payload: VoidTransactionTcpPayload,
+  ): Promise<VoidTransactionResponse> {
+    const userId = requireAuthenticatedUserId(context);
+    const normalized = normalizeVoidPayload(payload);
+    const occurredOnDate = toLimaCalendarDateUtc(normalized.occurredOn);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        if (normalized.idempotencyKey !== null) {
+          const existing = await this.findByIdempotencyKey(tx, userId, normalized.idempotencyKey);
+          if (existing) {
+            return this.resolveIdempotentVoidResponse(tx, userId, existing, normalized);
+          }
+        }
+
+        const lockedTxRows = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM public.financial_transactions
+          WHERE id = ${normalized.id}::uuid AND user_id = ${userId}::uuid
+          FOR UPDATE
+        `;
+
+        if (lockedTxRows.length === 0) {
+          throw buildNotFoundRpc('Transaction not found');
+        }
+
+        const original = await tx.financialTransaction.findFirst({
+          where: {
+            id: normalized.id,
+            userId,
+          },
+          include: {
+            fundEntries: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+          },
+        });
+
+        if (!original) {
+          throw buildNotFoundRpc('Transaction not found');
+        }
+
+        if (original.type === 'VOID' || original.type === 'REFUND') {
+          throw buildBadRequestRpc('Void and refund transactions cannot be voided');
+        }
+
+        if (original.status === 'VOIDED') {
+          throw buildConflictRpc('Transaction is already voided');
+        }
+
+        if (normalized.occurredOn < formatDbCalendarDate(original.occurredOn)) {
+          throw buildBadRequestRpc('Void date cannot be earlier than original transaction date');
+        }
+
+        const refundCount = await tx.financialTransaction.count({
+          where: {
+            userId,
+            relatedTransactionId: original.id,
+            type: 'REFUND',
+          },
+        });
+
+        if (refundCount > 0) {
+          throw buildConflictRpc('Cannot void a transaction that already has refunds');
+        }
+
+        if (original.fundEntries.length === 0) {
+          throw buildBadRequestRpc('Original transaction has no fund entries to void');
+        }
+
+        const uniqueFundIds = Array.from(
+          new Set(original.fundEntries.map((entry) => entry.fundId.toLowerCase())),
+        ).sort();
+
+        const lockedFundRows =
+          uniqueFundIds.length === 1
+            ? await tx.$queryRaw<Array<{ id: string }>>`
+                SELECT id
+                FROM public.funds
+                WHERE id = ${uniqueFundIds[0]}::uuid AND user_id = ${userId}::uuid
+                FOR UPDATE
+              `
+            : await tx.$queryRaw<Array<{ id: string }>>`
+                SELECT id
+                FROM public.funds
+                WHERE id IN (${uniqueFundIds[0]}::uuid, ${uniqueFundIds[1]}::uuid)
+                  AND user_id = ${userId}::uuid
+                ORDER BY id ASC
+                FOR UPDATE
+              `;
+
+        if (lockedFundRows.length !== uniqueFundIds.length) {
+          throw buildNotFoundRpc('Fund not found');
+        }
+
+        const funds = await tx.fund.findMany({
+          where: {
+            id: { in: uniqueFundIds },
+            userId,
+          },
+        });
+
+        if (funds.length !== uniqueFundIds.length) {
+          throw buildNotFoundRpc('Fund not found');
+        }
+
+        const fundById = new Map(funds.map((fund) => [fund.id.toLowerCase(), fund]));
+        for (const fund of funds) {
+          if (fund.isArchived) {
+            throw buildConflictRpc('Cannot void transaction affecting an archived fund');
+          }
+        }
+
+        const counterEntriesPlan = original.fundEntries.map((entry) => ({
+          fundId: entry.fundId.toLowerCase(),
+          currency: entry.currency,
+          signedAmount: formatMoney(parseMoney(entry.signedAmount.toString()).negated()),
+        }));
+
+        const netDeltaByFund = new Map<string, string>();
+        for (const plan of counterEntriesPlan) {
+          const prev = netDeltaByFund.get(plan.fundId) ?? '0.00';
+          netDeltaByFund.set(plan.fundId, addMoney(prev, plan.signedAmount));
+        }
+
+        const affectedFundBalances: AffectedFundBalanceView[] = [];
+        for (const fundId of uniqueFundIds) {
+          const fund = fundById.get(fundId);
+          if (!fund) {
+            throw buildNotFoundRpc('Fund not found');
+          }
+
+          const currentBalance = await this.getFundBalance(tx, userId, fund.id);
+          const delta = netDeltaByFund.get(fundId) ?? '0.00';
+          const balanceAfter = addMoney(currentBalance, delta);
+
+          if (
+            parseMoney(delta).isNegative() &&
+            !fund.allowNegativeBalance &&
+            parseMoney(balanceAfter).lessThan(0)
+          ) {
+            throw buildConflictRpc('Insufficient balance in fund to void transaction');
+          }
+
+          affectedFundBalances.push({
+            fundId,
+            balanceAfter,
+          });
+        }
+
+        await tx.financialTransaction.update({
+          where: { id: original.id },
+          data: { status: 'VOIDED' },
+        });
+
+        const resolvedDescription =
+          normalized.reason ?? buildDefaultPrefixedDescription('Anulación', original.description);
+
+        const createdVoidHeader = await tx.financialTransaction.create({
+          data: {
+            userId,
+            type: 'VOID',
+            status: 'POSTED',
+            amount: formatMoney(original.amount.toString()),
+            currency: original.currency,
+            occurredOn: occurredOnDate,
+            description: resolvedDescription,
+            notes: normalized.notes,
+            categoryId: original.categoryId,
+            relatedTransactionId: original.id,
+            idempotencyKey: normalized.idempotencyKey,
+          },
+        });
+
+        const createdCounterEntries: FundEntryDbProjection[] = [];
+        for (const plan of counterEntriesPlan) {
+          const createdEntry = await tx.fundEntry.create({
+            data: {
+              userId,
+              transactionId: createdVoidHeader.id,
+              fundId: plan.fundId,
+              signedAmount: plan.signedAmount,
+              currency: plan.currency,
+              occurredOn: occurredOnDate,
+            },
+          });
+          createdCounterEntries.push(createdEntry);
+        }
+
+        return {
+          voidTransaction: toTransactionDetailView({
+            ...createdVoidHeader,
+            fundEntries: createdCounterEntries,
+            transactionSplits: [],
+          }),
+          originalTransactionId: original.id,
+          originalStatus: 'VOIDED',
+          affectedFundBalances,
+        };
+      });
+    } catch (error) {
+      if (isPrismaUniqueViolation(error)) {
+        if (normalized.idempotencyKey !== null) {
+          const winner = await this.findByIdempotencyKey(
+            this.prisma,
+            userId,
+            normalized.idempotencyKey,
+          );
+          if (winner) {
+            return this.resolveIdempotentVoidResponse(this.prisma, userId, winner, normalized);
+          }
+        }
+
+        const existingVoid = await this.prisma.financialTransaction.findFirst({
+          where: {
+            userId,
+            relatedTransactionId: normalized.id,
+            type: 'VOID',
+          },
+          select: { id: true },
+        });
+
+        if (existingVoid) {
+          throw buildConflictRpc('Transaction is already voided');
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  private async resolveIdempotentRefundResponse(
+    db: PrismaService | Prisma.TransactionClient,
+    userId: string,
+    existing: TransactionDbProjection,
+    normalized: NormalizedRefundRequest,
+  ): Promise<RefundTransactionResponse> {
+    if (
+      existing.type !== 'REFUND' ||
+      existing.relatedTransactionId === null ||
+      existing.relatedTransactionId.toLowerCase() !== normalized.id
+    ) {
+      throw buildConflictRpc('Idempotency key already used with different request parameters');
+    }
+
+    const original = await db.financialTransaction.findFirst({
+      where: {
+        id: normalized.id,
+        userId,
+      },
+      select: {
+        id: true,
+        amount: true,
+        description: true,
+      },
+    });
+
+    if (!original) {
+      throw buildConflictRpc('Idempotency key already used with different request parameters');
+    }
+
+    const expectedDescription =
+      normalized.description ?? buildDefaultPrefixedDescription('Reembolso', original.description);
+
+    if (
+      formatMoney(existing.amount.toString()) !== normalized.amount ||
+      formatDbCalendarDate(existing.occurredOn) !== normalized.occurredOn ||
+      existing.description !== expectedDescription ||
+      (existing.notes ?? null) !== normalized.notes ||
+      existing.fundEntries.length !== 1
+    ) {
+      throw buildConflictRpc('Idempotency key already used with different request parameters');
+    }
+
+    const refundAgg = await db.financialTransaction.aggregate({
+      where: {
+        userId,
+        relatedTransactionId: original.id,
+        type: 'REFUND',
+        status: 'POSTED',
+      },
+      _sum: { amount: true },
+    });
+
+    const totalRefundedAfter = formatMoney(refundAgg._sum.amount?.toString() ?? '0.00');
+    const originalAmount = formatMoney(original.amount.toString());
+    const remainingRefundableAmount = subMoney(originalAmount, totalRefundedAfter);
+    const fundBalanceAfter = await this.getFundBalance(db, userId, existing.fundEntries[0].fundId);
+
+    return {
+      refundTransaction: toTransactionDetailView(existing),
+      originalTransactionId: original.id,
+      totalRefundedAfter,
+      remainingRefundableAmount,
+      fundBalanceAfter,
+    };
+  }
+
+  async refundTransaction(
+    context: InternalAuthContext,
+    payload: RefundTransactionTcpPayload,
+  ): Promise<RefundTransactionResponse> {
+    const userId = requireAuthenticatedUserId(context);
+    const normalized = normalizeRefundPayload(payload);
+    const occurredOnDate = toLimaCalendarDateUtc(normalized.occurredOn);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        if (normalized.idempotencyKey !== null) {
+          const existing = await this.findByIdempotencyKey(tx, userId, normalized.idempotencyKey);
+          if (existing) {
+            return this.resolveIdempotentRefundResponse(tx, userId, existing, normalized);
+          }
+        }
+
+        const lockedTxRows = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM public.financial_transactions
+          WHERE id = ${normalized.id}::uuid AND user_id = ${userId}::uuid
+          FOR UPDATE
+        `;
+
+        if (lockedTxRows.length === 0) {
+          throw buildNotFoundRpc('Transaction not found');
+        }
+
+        const original = await tx.financialTransaction.findFirst({
+          where: {
+            id: normalized.id,
+            userId,
+          },
+          include: {
+            fundEntries: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+          },
+        });
+
+        if (!original) {
+          throw buildNotFoundRpc('Transaction not found');
+        }
+
+        if (original.type !== 'EXPENSE') {
+          throw buildBadRequestRpc('Only expense transactions can be refunded');
+        }
+
+        if (original.status !== 'POSTED') {
+          throw buildConflictRpc('Cannot refund a voided transaction');
+        }
+
+        if (normalized.occurredOn < formatDbCalendarDate(original.occurredOn)) {
+          throw buildBadRequestRpc('Refund date cannot be earlier than original transaction date');
+        }
+
+        if (original.fundEntries.length !== 1) {
+          throw buildBadRequestRpc('Invalid expense fund entries');
+        }
+
+        const originalFundId = original.fundEntries[0].fundId.toLowerCase();
+
+        const lockedFundRows = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM public.funds
+          WHERE id = ${originalFundId}::uuid AND user_id = ${userId}::uuid
+          FOR UPDATE
+        `;
+
+        if (lockedFundRows.length === 0) {
+          throw buildNotFoundRpc('Fund not found');
+        }
+
+        const fund = await tx.fund.findFirst({
+          where: {
+            id: originalFundId,
+            userId,
+          },
+        });
+
+        if (!fund) {
+          throw buildNotFoundRpc('Fund not found');
+        }
+
+        if (fund.isArchived) {
+          throw buildConflictRpc('Cannot refund transaction on an archived fund');
+        }
+
+        const refundAgg = await tx.financialTransaction.aggregate({
+          where: {
+            userId,
+            relatedTransactionId: original.id,
+            type: 'REFUND',
+            status: 'POSTED',
+          },
+          _sum: { amount: true },
+        });
+
+        const refundedSoFar = formatMoney(refundAgg._sum.amount?.toString() ?? '0.00');
+        const originalAmount = formatMoney(original.amount.toString());
+        const totalRefundedAfter = addMoney(refundedSoFar, normalized.amount);
+
+        if (parseMoney(totalRefundedAfter).greaterThan(parseMoney(originalAmount))) {
+          throw buildConflictRpc('Refund amount exceeds remaining refundable amount');
+        }
+
+        const remainingRefundableAmount = subMoney(originalAmount, totalRefundedAfter);
+        const currentBalance = await this.getFundBalance(tx, userId, fund.id);
+        const fundBalanceAfter = addMoney(currentBalance, normalized.amount);
+
+        const resolvedDescription =
+          normalized.description ??
+          buildDefaultPrefixedDescription('Reembolso', original.description);
+
+        const createdRefundHeader = await tx.financialTransaction.create({
+          data: {
+            userId,
+            type: 'REFUND',
+            status: 'POSTED',
+            amount: normalized.amount,
+            currency: original.currency,
+            occurredOn: occurredOnDate,
+            description: resolvedDescription,
+            notes: normalized.notes,
+            categoryId: original.categoryId,
+            relatedTransactionId: original.id,
+            idempotencyKey: normalized.idempotencyKey,
+          },
+        });
+
+        const createdEntry = await tx.fundEntry.create({
+          data: {
+            userId,
+            transactionId: createdRefundHeader.id,
+            fundId: fund.id,
+            signedAmount: normalized.amount,
+            currency: original.currency,
+            occurredOn: occurredOnDate,
+          },
+        });
+
+        return {
+          refundTransaction: toTransactionDetailView({
+            ...createdRefundHeader,
+            fundEntries: [createdEntry],
+            transactionSplits: [],
+          }),
+          originalTransactionId: original.id,
+          totalRefundedAfter,
+          remainingRefundableAmount,
+          fundBalanceAfter,
+        };
+      });
+    } catch (error) {
+      if (normalized.idempotencyKey !== null && isPrismaUniqueViolation(error)) {
+        const winner = await this.findByIdempotencyKey(
+          this.prisma,
+          userId,
+          normalized.idempotencyKey,
+        );
+
+        if (!winner) {
+          throw error;
+        }
+
+        return this.resolveIdempotentRefundResponse(this.prisma, userId, winner, normalized);
+      }
+
+      throw error;
+    }
+  }
+
+  async listTransactions(
+    context: InternalAuthContext,
+    payload: ListTransactionsTcpPayload,
+  ): Promise<ListTransactionsResponse> {
+    const userId = requireAuthenticatedUserId(context);
+    const normalized = normalizeListTransactionsPayload(payload);
+
+    const andConditions: Prisma.FinancialTransactionWhereInput[] = [];
+
+    if (normalized.categoryId !== undefined) {
+      andConditions.push({
+        OR: [
+          { categoryId: normalized.categoryId },
+          {
+            transactionSplits: {
+              some: {
+                userId,
+                categoryId: normalized.categoryId,
+              },
+            },
+          },
+        ],
+      });
+    }
+
+    if (normalized.search !== undefined) {
+      andConditions.push({
+        OR: [
+          { description: { contains: normalized.search, mode: 'insensitive' } },
+          { notes: { contains: normalized.search, mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    const where: Prisma.FinancialTransactionWhereInput = {
+      userId,
+      ...(normalized.type !== undefined ? { type: normalized.type } : {}),
+      ...(normalized.status !== undefined ? { status: normalized.status } : {}),
+      ...(normalized.currency !== undefined ? { currency: normalized.currency } : {}),
+      ...(normalized.fundId !== undefined
+        ? {
+            fundEntries: {
+              some: {
+                userId,
+                fundId: normalized.fundId,
+              },
+            },
+          }
+        : {}),
+      ...(normalized.fromDate !== undefined || normalized.toDate !== undefined
+        ? {
+            occurredOn: {
+              ...(normalized.fromDate !== undefined
+                ? { gte: toLimaCalendarDateUtc(normalized.fromDate) }
+                : {}),
+              ...(normalized.toDate !== undefined
+                ? { lte: toLimaCalendarDateUtc(normalized.toDate) }
+                : {}),
+            },
+          }
+        : {}),
+      ...(andConditions.length > 0 ? { AND: andConditions } : {}),
+    };
+
+    const skip = (normalized.page - 1) * normalized.limit;
+
+    const [total, rows] = await Promise.all([
+      this.prisma.financialTransaction.count({ where }),
+      this.prisma.financialTransaction.findMany({
+        where,
+        orderBy: [{ occurredOn: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: normalized.limit,
+        include: {
+          fundEntries: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+          transactionSplits: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+        },
+      }),
+    ]);
+
+    const totalPages = total === 0 ? 0 : Math.ceil(total / normalized.limit);
+
+    return {
+      items: rows.map(toTransactionDetailView),
+      page: normalized.page,
+      limit: normalized.limit,
+      total,
+      totalPages,
+    };
+  }
+
+  async getMonthlySummary(
+    context: InternalAuthContext,
+    payload: GetMonthlySummaryTcpPayload,
+  ): Promise<MonthlySummaryResponse> {
+    const userId = requireAuthenticatedUserId(context);
+    const normalized = normalizeMonthlySummaryPayload(payload);
+
+    if (normalized.fundId !== undefined) {
+      const fund = await this.prisma.fund.findFirst({
+        where: {
+          id: normalized.fundId,
+          userId,
+        },
+        select: { id: true },
+      });
+
+      if (!fund) {
+        throw buildNotFoundRpc('Fund not found');
+      }
+    }
+
+    const transactions = (await this.prisma.financialTransaction.findMany({
+      where: {
+        userId,
+        status: 'POSTED',
+        type: { in: ['INCOME', 'EXPENSE', 'REFUND'] },
+        occurredOn: {
+          gte: toLimaCalendarDateUtc(normalized.fromDate),
+          lte: toLimaCalendarDateUtc(normalized.toDate),
+        },
+        ...(normalized.fundId !== undefined
+          ? {
+              fundEntries: {
+                some: {
+                  userId,
+                  fundId: normalized.fundId,
+                },
+              },
+            }
+          : {}),
+      },
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            kind: true,
+            color: true,
+            icon: true,
+          },
+        },
+        transactionSplits: {
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                kind: true,
+                color: true,
+                icon: true,
+              },
+            },
+          },
+        },
+      },
+    })) as unknown as MonthlySummaryTransactionProjection[];
+
+    if (transactions.length === 0) {
+      return {
+        month: normalized.month,
+        fromDate: normalized.fromDate,
+        toDate: normalized.toDate,
+        fundId: normalized.fundId ?? null,
+        currencies: [],
+      };
+    }
+
+    interface CurrencyAccumulator {
+      totalIncome: string;
+      totalExpenseGross: string;
+      totalRefunds: string;
+      transactionCount: number;
+      categories: Map<string, CategoryMonthlySummaryItemView>;
+    }
+
+    const byCurrency = new Map<FundCurrencyCode, CurrencyAccumulator>();
+
+    for (const txRecord of transactions) {
+      let acc = byCurrency.get(txRecord.currency);
+      if (!acc) {
+        acc = {
+          totalIncome: '0.00',
+          totalExpenseGross: '0.00',
+          totalRefunds: '0.00',
+          transactionCount: 0,
+          categories: new Map<string, CategoryMonthlySummaryItemView>(),
+        };
+        byCurrency.set(txRecord.currency, acc);
+      }
+
+      const txAmount = formatMoney(txRecord.amount.toString());
+      acc.transactionCount += 1;
+
+      if (txRecord.type === 'INCOME') {
+        acc.totalIncome = addMoney(acc.totalIncome, txAmount);
+      } else if (txRecord.type === 'EXPENSE') {
+        acc.totalExpenseGross = addMoney(acc.totalExpenseGross, txAmount);
+      } else if (txRecord.type === 'REFUND') {
+        acc.totalRefunds = addMoney(acc.totalRefunds, txAmount);
+      }
+
+      if (txRecord.type === 'INCOME' || txRecord.type === 'EXPENSE') {
+        if (txRecord.transactionSplits.length > 0) {
+          const seenCategoriesInTx = new Set<string>();
+          for (const split of txRecord.transactionSplits) {
+            const splitAmount = formatMoney(split.amount.toString());
+            const existingCat = acc.categories.get(split.category.id);
+            const countDelta = seenCategoriesInTx.has(split.category.id) ? 0 : 1;
+            seenCategoriesInTx.add(split.category.id);
+
+            if (existingCat) {
+              existingCat.totalAmount = addMoney(existingCat.totalAmount, splitAmount);
+              existingCat.transactionCount += countDelta;
+            } else {
+              acc.categories.set(split.category.id, {
+                categoryId: split.category.id,
+                categoryName: split.category.name,
+                kind: split.category.kind,
+                color: split.category.color,
+                icon: split.category.icon,
+                totalAmount: splitAmount,
+                transactionCount: 1,
+              });
+            }
+          }
+        } else if (txRecord.category !== null) {
+          const existingCat = acc.categories.get(txRecord.category.id);
+          if (existingCat) {
+            existingCat.totalAmount = addMoney(existingCat.totalAmount, txAmount);
+            existingCat.transactionCount += 1;
+          } else {
+            acc.categories.set(txRecord.category.id, {
+              categoryId: txRecord.category.id,
+              categoryName: txRecord.category.name,
+              kind: txRecord.category.kind,
+              color: txRecord.category.color,
+              icon: txRecord.category.icon,
+              totalAmount: txAmount,
+              transactionCount: 1,
+            });
+          }
+        }
+      }
+    }
+
+    const currencies: CurrencyMonthlySummaryView[] = Array.from(byCurrency.entries())
+      .sort(([left], [right]) => CURRENCY_ORDER[left] - CURRENCY_ORDER[right])
+      .map(([currency, acc]) => {
+        const totalExpenseNet = subMoney(acc.totalExpenseGross, acc.totalRefunds);
+        const netCashFlow = subMoney(acc.totalIncome, totalExpenseNet);
+        const byCategory = Array.from(acc.categories.values()).sort((left, right) => {
+          const kindCmp = CATEGORY_KIND_ORDER[left.kind] - CATEGORY_KIND_ORDER[right.kind];
+          if (kindCmp !== 0) {
+            return kindCmp;
+          }
+          const amountCmp = parseMoney(right.totalAmount).comparedTo(parseMoney(left.totalAmount));
+          if (amountCmp !== 0) {
+            return amountCmp;
+          }
+          return left.categoryName.localeCompare(right.categoryName);
+        });
+
+        return {
+          currency,
+          totalIncome: acc.totalIncome,
+          totalExpenseGross: acc.totalExpenseGross,
+          totalRefunds: acc.totalRefunds,
+          totalExpenseNet,
+          netCashFlow,
+          transactionCount: acc.transactionCount,
+          byCategory,
+        };
+      });
+
+    return {
+      month: normalized.month,
+      fromDate: normalized.fromDate,
+      toDate: normalized.toDate,
+      fundId: normalized.fundId ?? null,
+      currencies,
+    };
   }
 }

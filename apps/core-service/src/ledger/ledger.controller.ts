@@ -1,17 +1,25 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 import {
+  GetMonthlySummaryTcpPayload,
   GetTransactionByIdTcpPayload,
   GetTransactionResponse,
   InternalAuthContext,
   LEDGER_PATTERNS,
+  ListTransactionsResponse,
+  ListTransactionsTcpPayload,
+  MonthlySummaryResponse,
   RecordAdjustmentResponse,
   RecordAdjustmentTcpPayload,
   RecordTransactionResponse,
   RecordTransactionTcpPayload,
   RecordTransferResponse,
   RecordTransferTcpPayload,
+  RefundTransactionResponse,
+  RefundTransactionTcpPayload,
   SignedTcpEnvelope,
+  VoidTransactionResponse,
+  VoidTransactionTcpPayload,
 } from '@app/shared';
 import { CurrentInternalContext } from '../common/decorators/current-internal-context.decorator';
 import { LedgerService } from './ledger.service';
@@ -50,5 +58,37 @@ export class LedgerController {
     @Payload() envelope: SignedTcpEnvelope<GetTransactionByIdTcpPayload>,
   ): Promise<GetTransactionResponse> {
     return this.ledgerService.getById(context, envelope.payload);
+  }
+
+  @MessagePattern(LEDGER_PATTERNS.VOID_TRANSACTION)
+  voidTransaction(
+    @CurrentInternalContext() context: InternalAuthContext,
+    @Payload() envelope: SignedTcpEnvelope<VoidTransactionTcpPayload>,
+  ): Promise<VoidTransactionResponse> {
+    return this.ledgerService.voidTransaction(context, envelope.payload);
+  }
+
+  @MessagePattern(LEDGER_PATTERNS.REFUND_TRANSACTION)
+  refundTransaction(
+    @CurrentInternalContext() context: InternalAuthContext,
+    @Payload() envelope: SignedTcpEnvelope<RefundTransactionTcpPayload>,
+  ): Promise<RefundTransactionResponse> {
+    return this.ledgerService.refundTransaction(context, envelope.payload);
+  }
+
+  @MessagePattern(LEDGER_PATTERNS.LIST_TRANSACTIONS)
+  listTransactions(
+    @CurrentInternalContext() context: InternalAuthContext,
+    @Payload() envelope: SignedTcpEnvelope<ListTransactionsTcpPayload>,
+  ): Promise<ListTransactionsResponse> {
+    return this.ledgerService.listTransactions(context, envelope.payload);
+  }
+
+  @MessagePattern(LEDGER_PATTERNS.GET_MONTHLY_SUMMARY)
+  getMonthlySummary(
+    @CurrentInternalContext() context: InternalAuthContext,
+    @Payload() envelope: SignedTcpEnvelope<GetMonthlySummaryTcpPayload>,
+  ): Promise<MonthlySummaryResponse> {
+    return this.ledgerService.getMonthlySummary(context, envelope.payload);
   }
 }

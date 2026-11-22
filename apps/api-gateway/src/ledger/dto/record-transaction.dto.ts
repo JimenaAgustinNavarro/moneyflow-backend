@@ -72,8 +72,8 @@ export function IsGregorianDateString(validationOptions?: ValidationOptions): Pr
         validate(value: unknown): boolean {
           return typeof value === 'string' && isValidGregorianDate(value);
         },
-        defaultMessage(): string {
-          return 'occurredOn must be a valid Gregorian calendar date in YYYY-MM-DD format';
+        defaultMessage(args: ValidationArguments): string {
+          return `${args.property} must be a valid Gregorian calendar date in YYYY-MM-DD format`;
         },
       },
     });
