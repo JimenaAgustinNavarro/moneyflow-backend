@@ -1,4 +1,4 @@
-# Contrato HTTP / TCP — Autenticación y Sesiones (MF-006 + MF-007)
+# Contrato HTTP / TCP — Autenticación y Sesiones (MF-006 + MF-007 + MF-008)
 
 Todos los mensajes TCP entre `apps/api-gateway` y `apps/core-service` utilizan `SignedTcpEnvelope<TPayload>` con `context: InternalAuthContext` firmado mediante `INTERNAL_TCP_SECRET`.
 
@@ -79,3 +79,44 @@ Todos los mensajes TCP entre `apps/api-gateway` y `apps/core-service` utilizan `
 - **TCP Pattern:** `auth.logoutAll` (`AUTH_PATTERNS.LOGOUT_ALL`)
 - **Cookies:** Siempre limpia `mf_access_token` y `mf_refresh_token`.
 - **Response (`200 OK`):** `{ revokedCount, message }`
+
+## 10. Solicitud de recuperación de contraseña (`POST /api/v1/auth/forgot-password`, `200 OK`)
+
+- **TCP Pattern:** `auth.forgotPassword` (`AUTH_PATTERNS.FORGOT_PASSWORD`)
+- **Rate Limit:** `3` req / `60s`
+- **Request (`ForgotPasswordDto`):** `{ email }`
+- **Response (`200 OK`):** `{ message }` (constante anti-enumeración)
+- **Notas:** Invalida tokens `PASSWORD_RESET` previos pendientes, genera nuevo token SHA-256 con TTL de `60` minutos, registra `PASSWORD_RESET_REQUESTED` y envía correo vía Mailpit fuera de la transacción.
+
+## 11. Restablecimiento de contraseña (`POST /api/v1/auth/reset-password`, `200 OK`)
+
+- **TCP Pattern:** `auth.resetPassword` (`AUTH_PATTERNS.RESET_PASSWORD`)
+- **Rate Limit:** `5` req / `60s`
+- **Request (`ResetPasswordDto`):** `{ token, newPassword }`
+- **Cookies:** Limpia `mf_access_token` y `mf_refresh_token` tras completar con éxito.
+- **Response (`200 OK`):** `{ message }`
+- **Errores:** `400 Bad Request` (token inválido, expirado o ya consumido). Revoca todas las sesiones activas del usuario y audita `PASSWORD_RESET_COMPLETED`.
+
+## 12. Perfil actual (`GET /api/v1/auth/me`, `200 OK`)
+
+- **Guard:** `JwtAuthGuard`
+- **Query (`MeQueryDto`):** Sin parámetros permitidos (`forbidNonWhitelisted: true` rechaza `?userId=...` con `400`).
+- **TCP Pattern:** `auth.getMe` (`AUTH_PATTERNS.GET_ME`)
+- **Response (`200 OK`):** `{ user: RegisteredUserView }`
+- **Errores:** `401 Unauthorized` (cookie ausente/inválida o usuario inactivo/no verificado).
+
+## 13. Actualización de perfil (`PATCH /api/v1/auth/me`, `200 OK`)
+
+- **Guard:** `JwtAuthGuard` + `OriginCsrfGuard`
+- **TCP Pattern:** `auth.updateMe` (`AUTH_PATTERNS.UPDATE_ME`)
+- **Request (`UpdateProfileDto`):** `{ fullName }` (cualquier otro campo es rechazado con `400`).
+- **Response (`200 OK`):** `{ user: RegisteredUserView, message }`
+
+## 14. Cambio de contraseña autenticado (`POST /api/v1/auth/change-password`, `200 OK`)
+
+- **Guard:** `JwtAuthGuard` + `OriginCsrfGuard`
+- **Rate Limit:** `5` req / `60s`
+- **TCP Pattern:** `auth.changePassword` (`AUTH_PATTERNS.CHANGE_PASSWORD`)
+- **Request (`ChangePasswordDto`):** `{ currentPassword, newPassword }`
+- **Response (`200 OK`):** `{ revokedOtherSessionsCount, message }`
+- **Errores:** `400 Bad Request` (`newPassword === currentPassword` o validación), `401 Unauthorized` (sesión actual revocada/expirada o `currentPassword` incorrecto). Conserva la sesión actual y revoca todas las demás sesiones activas del usuario.

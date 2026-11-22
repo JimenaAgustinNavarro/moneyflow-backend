@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, Transporter } from 'nodemailer';
-import { EmailSender, SendEmailVerificationInput } from './email-sender.port';
+import {
+  EmailSender,
+  SendEmailVerificationInput,
+  SendPasswordResetInput,
+} from './email-sender.port';
 
 const DEFAULT_SMTP_HOST = '127.0.0.1';
 const DEFAULT_SMTP_PORT = 1025;
@@ -93,6 +97,50 @@ export class SmtpEmailSender implements EmailSender {
         typeof rawCode === 'string' || typeof rawCode === 'number' ? String(rawCode) : 'SMTP_ERROR';
       this.logger.warn(
         `SMTP delivery failed during email verification dispatch (code=${safeErrorCode})`,
+      );
+      throw new Error(`SMTP delivery failed (${safeErrorCode})`);
+    }
+  }
+
+  async sendPasswordReset(input: SendPasswordResetInput): Promise<void> {
+    const resetUrl = `${this.frontendUrl}/reset-password?token=${encodeURIComponent(input.rawToken)}`;
+    const safeName = escapeHtml(input.fullName);
+
+    const text = [
+      `Hola ${input.fullName},`,
+      '',
+      'Recibimos una solicitud para restablecer tu contraseña en MoneyFlow. Abre el siguiente enlace para continuar:',
+      resetUrl,
+      '',
+      `Este enlace expirará en ${input.expiresInMinutes} minutos.`,
+      'Si no solicitaste este cambio, puedes ignorar este mensaje.',
+    ].join('\n');
+
+    const html = [
+      `<p>Hola <strong>${safeName}</strong>,</p>`,
+      '<p>Recibimos una solicitud para restablecer tu contraseña en MoneyFlow. Haz clic en el siguiente enlace para continuar:</p>',
+      `<p><a href="${resetUrl}">Restablecer contraseña</a></p>`,
+      `<p>Este enlace expirará en ${input.expiresInMinutes} minutos.</p>`,
+      '<p>Si no solicitaste este cambio, puedes ignorar este mensaje.</p>',
+    ].join('');
+
+    try {
+      await this.transporter.sendMail({
+        from: this.fromAddress,
+        to: input.to,
+        subject: 'Restablece tu contraseña en MoneyFlow',
+        text,
+        html,
+      });
+    } catch (error) {
+      const rawCode =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? (error as { code?: unknown }).code
+          : undefined;
+      const safeErrorCode =
+        typeof rawCode === 'string' || typeof rawCode === 'number' ? String(rawCode) : 'SMTP_ERROR';
+      this.logger.warn(
+        `SMTP delivery failed during password reset dispatch (code=${safeErrorCode})`,
       );
       throw new Error(`SMTP delivery failed (${safeErrorCode})`);
     }

@@ -7,6 +7,14 @@ export interface SendEmailVerificationInput {
   expiresInHours: number;
 }
 
+export interface SendPasswordResetInput {
+  to: string;
+  fullName: string;
+  rawToken: string;
+  expiresInMinutes: number;
+}
+
 export interface EmailSender {
   sendEmailVerification(input: SendEmailVerificationInput): Promise<void>;
+  sendPasswordReset(input: SendPasswordResetInput): Promise<void>;
 }

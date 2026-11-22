@@ -28,6 +28,7 @@ describe('AuthService', () => {
     };
     userSession: {
       findUnique: jest.Mock;
+      findFirst: jest.Mock;
       findMany: jest.Mock;
       create: jest.Mock;
       updateMany: jest.Mock;
@@ -47,6 +48,10 @@ describe('AuthService', () => {
     Promise<void>,
     [Parameters<EmailSender['sendEmailVerification']>[0]]
   >;
+  let sendPasswordResetMock: jest.Mock<
+    Promise<void>,
+    [Parameters<EmailSender['sendPasswordReset']>[0]]
+  >;
   let service: AuthService;
 
   beforeEach(() => {
@@ -58,6 +63,7 @@ describe('AuthService', () => {
       },
       userSession: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
         findMany: jest.fn(),
         create: jest.fn(),
         updateMany: jest.fn(),
@@ -80,8 +86,12 @@ describe('AuthService', () => {
     sendEmailVerificationMock = jest.fn(
       (_input: Parameters<EmailSender['sendEmailVerification']>[0]) => Promise.resolve(),
     );
+    sendPasswordResetMock = jest.fn((_input: Parameters<EmailSender['sendPasswordReset']>[0]) =>
+      Promise.resolve(),
+    );
     emailSenderMock = {
       sendEmailVerification: sendEmailVerificationMock,
+      sendPasswordReset: sendPasswordResetMock,
     };
 
     service = new AuthService(prismaMock as unknown as PrismaService, emailSenderMock);
@@ -470,5 +480,284 @@ describe('AuthService', () => {
       audit: { ipAddress: null, userAgent: null },
     });
     expect(logoutIdempotent.message).toBe('Logged out successfully.');
+  });
+
+  it('forgotPassword enforces anti-enumeration, invalidates prior tokens, audits PASSWORD_RESET_REQUESTED, and survives SMTP failure', async () => {
+    prismaMock.user.findUnique.mockResolvedValueOnce(null);
+    const unknownRes = await service.forgotPassword(baseContext, {
+      email: 'unknown@example.com',
+      audit: { ipAddress: '127.0.0.1', userAgent: 'Jest' },
+    });
+
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: userAId,
+      email: 'inactive@example.com',
+      fullName: 'Inactive',
+      isActive: false,
+    });
+    const inactiveRes = await service.forgotPassword(baseContext, {
+      email: 'inactive@example.com',
+      audit: { ipAddress: null, userAgent: null },
+    });
+    expect(unknownRes).toEqual(inactiveRes);
+    expect(sendPasswordResetMock).not.toHaveBeenCalled();
+
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: userAId,
+      email: 'ana@example.com',
+      fullName: 'Ana Pérez',
+      isActive: true,
+    });
+    sendPasswordResetMock.mockRejectedValueOnce(new Error('SMTP down'));
+
+    const activeRes = await service.forgotPassword(baseContext, {
+      email: '  ANA@Example.COM ',
+      audit: { ipAddress: '127.0.0.1', userAgent: 'Jest' },
+    });
+
+    expect(activeRes).toEqual(unknownRes);
+
+    const invalidateCall = prismaMock.authToken.updateMany.mock.calls[0] as [
+      { where: { userId: string; type: AuthTokenType; usedAt: null }; data: { usedAt: Date } },
+    ];
+    expect(invalidateCall[0].where).toEqual({
+      userId: userAId,
+      type: AuthTokenType.PASSWORD_RESET,
+      usedAt: null,
+    });
+    expect(invalidateCall[0].data.usedAt).toBeInstanceOf(Date);
+
+    const createTokenCall = prismaMock.authToken.create.mock.calls[0] as [
+      { data: { userId: string; type: AuthTokenType; tokenHash: string; expiresAt: Date } },
+    ];
+    expect(createTokenCall[0].data.userId).toBe(userAId);
+    expect(createTokenCall[0].data.type).toBe(AuthTokenType.PASSWORD_RESET);
+    expect(createTokenCall[0].data.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(createTokenCall[0].data.expiresAt).toBeInstanceOf(Date);
+
+    const auditCall = prismaMock.authAuditLog.create.mock.calls[0] as [
+      { data: { userId: string; event: AuthAuditEvent } },
+    ];
+    expect(auditCall[0].data.userId).toBe(userAId);
+    expect(auditCall[0].data.event).toBe(AuthAuditEvent.PASSWORD_RESET_REQUESTED);
+
+    const emailCall = sendPasswordResetMock.mock.calls[0][0];
+    expect(emailCall.to).toBe('ana@example.com');
+    expect(emailCall.expiresInMinutes).toBe(60);
+  });
+
+  it('resetPassword pre-validates token before hashing, consumes atomically, revokes all sessions, and rejects race conditions', async () => {
+    prismaMock.authToken.findUnique.mockResolvedValueOnce(null);
+    await expect(
+      service.resetPassword(baseContext, {
+        token: 'a'.repeat(64),
+        newPassword: 'NewPassword123',
+        audit: { ipAddress: null, userAgent: null },
+      }),
+    ).rejects.toThrow(RpcException);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+
+    const rawToken = 'b'.repeat(64);
+    prismaMock.authToken.findUnique.mockResolvedValue({
+      id: 'reset-token-1',
+      userId: userAId,
+      type: AuthTokenType.PASSWORD_RESET,
+      tokenHash: hashOpaqueTokenSha256(rawToken),
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+      user: {
+        id: userAId,
+        isActive: true,
+      },
+    });
+    prismaMock.authToken.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    prismaMock.userSession.updateMany.mockResolvedValueOnce({ count: 2 });
+
+    const res = await service.resetPassword(baseContext, {
+      token: rawToken,
+      newPassword: 'NewPassword123',
+      audit: { ipAddress: '127.0.0.1', userAgent: 'Jest' },
+    });
+    expect(res.message).toContain('Password has been reset successfully');
+
+    const userUpdateCall = prismaMock.user.update.mock.calls[0] as [
+      { where: { id: string }; data: { passwordHash: string } },
+    ];
+    expect(userUpdateCall[0].where).toEqual({ id: userAId });
+    expect(userUpdateCall[0].data.passwordHash).toContain('$argon2id$');
+
+    const revokeSessionsCall = prismaMock.userSession.updateMany.mock.calls[0] as [
+      { where: { userId: string; revokedAt: null }; data: { revokedAt: Date } },
+    ];
+    expect(revokeSessionsCall[0].where).toEqual({ userId: userAId, revokedAt: null });
+    expect(revokeSessionsCall[0].data.revokedAt).toBeInstanceOf(Date);
+
+    const resetAuditCall = prismaMock.authAuditLog.create.mock.calls[0] as [
+      {
+        data: {
+          userId: string;
+          event: AuthAuditEvent;
+          metadata: { tokenId: string; revokedSessionsCount: number };
+        };
+      },
+    ];
+    expect(resetAuditCall[0].data.userId).toBe(userAId);
+    expect(resetAuditCall[0].data.event).toBe(AuthAuditEvent.PASSWORD_RESET_COMPLETED);
+    expect(resetAuditCall[0].data.metadata).toEqual({
+      tokenId: 'reset-token-1',
+      revokedSessionsCount: 2,
+    });
+
+    prismaMock.authToken.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      service.resetPassword(baseContext, {
+        token: rawToken,
+        newPassword: 'NewPassword123',
+        audit: { ipAddress: null, userAgent: null },
+      }),
+    ).rejects.toThrow(RpcException);
+  });
+
+  it('getMe and updateMe scope strictly by context.userId and reject inactive or unverified users', async () => {
+    const authContext: InternalAuthContext = {
+      ...baseContext,
+      userId: userAId,
+    };
+
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: userAId,
+      email: 'ana@example.com',
+      fullName: 'Ana Pérez',
+      preferredCurrency: 'PEN',
+      timezone: 'America/Lima',
+      emailVerifiedAt: null,
+      isActive: true,
+      createdAt: new Date('2026-11-22T01:00:00.000Z'),
+    });
+    await expect(service.getMe(authContext)).rejects.toThrow(RpcException);
+
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: userAId,
+      email: 'ana@example.com',
+      fullName: 'Ana Pérez',
+      preferredCurrency: 'PEN',
+      timezone: 'America/Lima',
+      emailVerifiedAt: new Date('2026-11-22T01:05:00.000Z'),
+      isActive: true,
+      createdAt: new Date('2026-11-22T01:00:00.000Z'),
+    });
+    const meRes = await service.getMe(authContext);
+    expect(meRes.user.id).toBe(userAId);
+    expect('passwordHash' in meRes.user).toBe(false);
+
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: userAId,
+      isActive: true,
+      emailVerifiedAt: new Date('2026-11-22T01:05:00.000Z'),
+    });
+    prismaMock.user.update.mockResolvedValueOnce({
+      id: userAId,
+      email: 'ana@example.com',
+      fullName: 'Ana María Pérez',
+      preferredCurrency: 'PEN',
+      timezone: 'America/Lima',
+      emailVerifiedAt: new Date('2026-11-22T01:05:00.000Z'),
+      isActive: true,
+      createdAt: new Date('2026-11-22T01:00:00.000Z'),
+    });
+    const updateRes = await service.updateMe(authContext, { fullName: '  Ana María Pérez  ' });
+    expect(updateRes.user.fullName).toBe('Ana María Pérez');
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: userAId },
+        data: { fullName: 'Ana María Pérez' },
+      }),
+    );
+  });
+
+  it('changePassword rejects revoked/expired current session, wrong password, same password, and revokes only other sessions', async () => {
+    const authContext: InternalAuthContext = {
+      ...baseContext,
+      userId: userAId,
+    };
+    const currentHash = await hashPasswordArgon2id('CurrentPass123');
+
+    prismaMock.userSession.findFirst.mockResolvedValueOnce(null);
+    await expect(
+      service.changePassword(authContext, {
+        currentPassword: 'CurrentPass123',
+        newPassword: 'NewPassword123',
+        currentSessionId: sessionA1Id,
+        audit: { ipAddress: null, userAgent: null },
+      }),
+    ).rejects.toThrow(RpcException);
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
+
+    prismaMock.userSession.findFirst.mockResolvedValue({ id: sessionA1Id });
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: userAId,
+      passwordHash: currentHash,
+      isActive: true,
+    });
+
+    await expect(
+      service.changePassword(authContext, {
+        currentPassword: 'WrongPassword123',
+        newPassword: 'NewPassword123',
+        currentSessionId: sessionA1Id,
+        audit: { ipAddress: null, userAgent: null },
+      }),
+    ).rejects.toThrow(RpcException);
+    expect(prismaMock.userSession.updateMany).not.toHaveBeenCalled();
+
+    await expect(
+      service.changePassword(authContext, {
+        currentPassword: 'CurrentPass123',
+        newPassword: 'CurrentPass123',
+        currentSessionId: sessionA1Id,
+        audit: { ipAddress: null, userAgent: null },
+      }),
+    ).rejects.toThrow(RpcException);
+
+    prismaMock.userSession.updateMany.mockResolvedValueOnce({ count: 2 });
+    const changed = await service.changePassword(authContext, {
+      currentPassword: 'CurrentPass123',
+      newPassword: 'NewPassword123',
+      currentSessionId: sessionA1Id,
+      audit: { ipAddress: '127.0.0.1', userAgent: 'Chrome' },
+    });
+
+    expect(changed.revokedOtherSessionsCount).toBe(2);
+
+    const revokeOthersCall = prismaMock.userSession.updateMany.mock.calls[0] as [
+      {
+        where: { userId: string; revokedAt: null; id: { not: string } };
+        data: { revokedAt: Date };
+      },
+    ];
+    expect(revokeOthersCall[0].where).toEqual({
+      userId: userAId,
+      revokedAt: null,
+      id: { not: sessionA1Id },
+    });
+    expect(revokeOthersCall[0].data.revokedAt).toBeInstanceOf(Date);
+
+    const changeAuditCall = prismaMock.authAuditLog.create.mock.calls[0] as [
+      {
+        data: {
+          userId: string;
+          event: AuthAuditEvent;
+          metadata: { currentSessionId: string; revokedOtherSessionsCount: number };
+        };
+      },
+    ];
+    expect(changeAuditCall[0].data.userId).toBe(userAId);
+    expect(changeAuditCall[0].data.event).toBe(AuthAuditEvent.PASSWORD_CHANGED);
+    expect(changeAuditCall[0].data.metadata).toEqual({
+      currentSessionId: sessionA1Id,
+      revokedOtherSessionsCount: 2,
+    });
   });
 });

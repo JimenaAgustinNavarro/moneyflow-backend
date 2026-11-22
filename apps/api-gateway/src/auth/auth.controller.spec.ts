@@ -376,4 +376,146 @@ describe('AuthController (HTTP boundary)', () => {
       ),
     ).toBe(true);
   });
+
+  it('POST /api/v1/auth/forgot-password and POST /api/v1/auth/reset-password enforce DTO validation, rate limit, and clear cookies only on reset success', async () => {
+    coreTcpClientMock.send.mockResolvedValueOnce({
+      message: 'If an account with that email exists, a password reset link has been sent.',
+    });
+
+    const forgotRes = await request(app.getHttpServer())
+      .post('/api/v1/auth/forgot-password')
+      .set('Origin', 'http://localhost:3001')
+      .send({ email: '  ANA@Example.COM  ' })
+      .expect(200);
+
+    expect(forgotRes.body).toEqual({
+      message: 'If an account with that email exists, a password reset link has been sent.',
+    });
+    expect(coreTcpClientMock.send).toHaveBeenCalledWith(
+      AUTH_PATTERNS.FORGOT_PASSWORD,
+      {
+        email: 'ana@example.com',
+        audit: { ipAddress: '127.0.0.1', userAgent: 'supertest' },
+      },
+      { requestId: 'req-gateway-1', userId: null },
+    );
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/reset-password')
+      .set('Origin', 'http://localhost:3001')
+      .send({ token: 'abc', newPassword: 'weak' })
+      .expect(400);
+
+    coreTcpClientMock.send.mockRejectedValueOnce(
+      new HttpException(
+        { statusCode: 400, error: 'Bad Request', message: 'Invalid token' },
+        HttpStatus.BAD_REQUEST,
+      ),
+    );
+    const failedReset = await request(app.getHttpServer())
+      .post('/api/v1/auth/reset-password')
+      .set('Origin', 'http://localhost:3001')
+      .send({ token: 'invalid-token', newPassword: 'NewPassword123' })
+      .expect(400);
+    expect(failedReset.headers['set-cookie']).toBeUndefined();
+
+    coreTcpClientMock.send.mockResolvedValueOnce({
+      message: 'Password has been reset successfully. Please log in with your new password.',
+    });
+    const okReset = await request(app.getHttpServer())
+      .post('/api/v1/auth/reset-password')
+      .set('Origin', 'http://localhost:3001')
+      .send({ token: 'valid-token', newPassword: 'NewPassword123' })
+      .expect(200);
+
+    const resetCookies = okReset.headers['set-cookie'] as unknown as string[];
+    expect(
+      resetCookies.some((c) => c.startsWith('mf_access_token=;') && c.includes('Path=/;')),
+    ).toBe(true);
+    expect(
+      resetCookies.some(
+        (c) => c.startsWith('mf_refresh_token=;') && c.includes('Path=/api/v1/auth;'),
+      ),
+    ).toBe(true);
+  });
+
+  it('SEC-001: enforces strict userId isolation, rejects injected query/body fields (400), and blocks invalid/missing JWT (401)', async () => {
+    const userBId = '99999999-9999-4999-8999-999999999999';
+    const userAAccessToken = await authJwtService.signAccessToken(userId, sessionId);
+
+    await request(app.getHttpServer()).get('/api/v1/auth/me').expect(401);
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('Cookie', ['mf_access_token=tampered.jwt.value'])
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/auth/me?userId=${userBId}`)
+      .set('Cookie', [`mf_access_token=${userAAccessToken}`])
+      .expect(400);
+
+    coreTcpClientMock.send.mockResolvedValueOnce({
+      user: {
+        id: userId,
+        email: 'ana@example.com',
+        fullName: 'Ana Pérez',
+        preferredCurrency: 'PEN',
+        timezone: 'America/Lima',
+        emailVerifiedAt: '2026-11-22T04:05:00.000Z',
+        isActive: true,
+        createdAt: '2026-11-22T04:00:00.000Z',
+      },
+    });
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('Cookie', [`mf_access_token=${userAAccessToken}`])
+      .expect(200);
+    expect(coreTcpClientMock.send).toHaveBeenCalledWith(
+      AUTH_PATTERNS.GET_ME,
+      {},
+      { requestId: 'req-gateway-1', userId },
+    );
+
+    await request(app.getHttpServer())
+      .patch('/api/v1/auth/me')
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${userAAccessToken}`])
+      .send({ fullName: 'Ana', email: 'hijack@example.com', userId: userBId, isActive: false })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/change-password')
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${userAAccessToken}`])
+      .send({
+        currentPassword: 'Password123',
+        newPassword: 'NewPassword123',
+        userId: userBId,
+      })
+      .expect(400);
+
+    coreTcpClientMock.send.mockResolvedValueOnce({
+      revokedOtherSessionsCount: 1,
+      message: 'Password changed successfully.',
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/change-password')
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${userAAccessToken}`])
+      .send({
+        currentPassword: 'Password123',
+        newPassword: 'NewPassword123',
+      })
+      .expect(200);
+    expect(coreTcpClientMock.send).toHaveBeenCalledWith(
+      AUTH_PATTERNS.CHANGE_PASSWORD,
+      {
+        currentPassword: 'Password123',
+        newPassword: 'NewPassword123',
+        currentSessionId: sessionId,
+        audit: { ipAddress: '127.0.0.1', userAgent: 'supertest' },
+      },
+      { requestId: 'req-gateway-1', userId },
+    );
+  });
 });

@@ -4,7 +4,12 @@ import { RpcException } from '@nestjs/microservices';
 import {
   AUTH_ERROR_CODES,
   AuthAuditMetadata,
+  ChangePasswordResponse,
+  ChangePasswordTcpPayload,
   CoreAuthSessionResult,
+  ForgotPasswordResponse,
+  ForgotPasswordTcpPayload,
+  GetProfileResponse,
   InternalAuthContext,
   ListSessionsResponse,
   ListSessionsTcpPayload,
@@ -19,8 +24,12 @@ import {
   RegisterUserTcpPayload,
   ResendVerificationResponse,
   ResendVerificationTcpPayload,
+  ResetPasswordResponse,
+  ResetPasswordTcpPayload,
   RevokeSessionResponse,
   RevokeSessionTcpPayload,
+  UpdateProfileResponse,
+  UpdateProfileTcpPayload,
   VerifyEmailResponse,
   VerifyEmailTcpPayload,
 } from '@app/shared';
@@ -38,13 +47,18 @@ import {
 
 const EMAIL_VERIFICATION_TTL_HOURS = 24;
 const EMAIL_VERIFICATION_TTL_MS = EMAIL_VERIFICATION_TTL_HOURS * 60 * 60 * 1000;
+const PASSWORD_RESET_TTL_MINUTES = 60;
+const PASSWORD_RESET_TTL_MS = PASSWORD_RESET_TTL_MINUTES * 60 * 1000;
 const REFRESH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_IP_LENGTH = 64;
 const MAX_USER_AGENT_LENGTH = 512;
 const MAX_REQUEST_ID_LENGTH = 128;
+const PASSWORD_POLICY_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/;
 
 const GENERIC_RESEND_MESSAGE =
   'If an account with that email exists and is pending verification, a new verification link has been sent.';
+const GENERIC_FORGOT_PASSWORD_MESSAGE =
+  'If an account with that email exists, a password reset link has been sent.';
 
 interface UserRecordProjection {
   id: string;
@@ -910,6 +924,402 @@ export class AuthService {
       revokedCount,
       message: 'All active sessions have been revoked.',
     };
+  }
+
+  async forgotPassword(
+    context: InternalAuthContext,
+    payload: ForgotPasswordTcpPayload,
+  ): Promise<ForgotPasswordResponse> {
+    const email = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
+    if (email.length === 0 || email.length > 255) {
+      return { message: GENERIC_FORGOT_PASSWORD_MESSAGE };
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        isActive: true,
+      },
+    });
+
+    if (!user || !user.isActive) {
+      return { message: GENERIC_FORGOT_PASSWORD_MESSAGE };
+    }
+
+    const { rawToken, tokenHash } = generateVerificationToken();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + PASSWORD_RESET_TTL_MS);
+    const audit = sanitizeAuditMetadata(payload.audit);
+    const requestId = sanitizeNullableString(context.requestId, MAX_REQUEST_ID_LENGTH);
+
+    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.authToken.updateMany({
+        where: {
+          userId: user.id,
+          type: AuthTokenType.PASSWORD_RESET,
+          usedAt: null,
+        },
+        data: {
+          usedAt: now,
+        },
+      });
+
+      await tx.authToken.create({
+        data: {
+          userId: user.id,
+          type: AuthTokenType.PASSWORD_RESET,
+          tokenHash,
+          expiresAt,
+        },
+      });
+
+      await tx.authAuditLog.create({
+        data: {
+          userId: user.id,
+          event: AuthAuditEvent.PASSWORD_RESET_REQUESTED,
+          ipAddress: audit.ipAddress,
+          userAgent: audit.userAgent,
+          requestId,
+        },
+      });
+    });
+
+    await this.dispatchPasswordResetEmailSafely({
+      userId: user.id,
+      requestId,
+      to: user.email,
+      fullName: user.fullName,
+      rawToken,
+    });
+
+    return {
+      message: GENERIC_FORGOT_PASSWORD_MESSAGE,
+    };
+  }
+
+  async resetPassword(
+    context: InternalAuthContext,
+    payload: ResetPasswordTcpPayload,
+  ): Promise<ResetPasswordResponse> {
+    const rawToken = typeof payload.token === 'string' ? payload.token.trim() : '';
+    if (rawToken.length === 0 || rawToken.length > 256) {
+      throw buildBadRequestRpc('Invalid, expired, or already used password reset token');
+    }
+
+    this.assertStrongPassword(payload.newPassword);
+
+    const tokenHash = hashOpaqueTokenSha256(rawToken);
+    const now = new Date();
+    const audit = sanitizeAuditMetadata(payload.audit);
+    const requestId = sanitizeNullableString(context.requestId, MAX_REQUEST_ID_LENGTH);
+
+    // Pre-validate token before Argon2id hashing to avoid DoS on invalid tokens.
+    const candidateToken = await this.prisma.authToken.findUnique({
+      where: { tokenHash },
+      include: {
+        user: {
+          select: {
+            id: true,
+            isActive: true,
+          },
+        },
+      },
+    });
+
+    if (
+      !candidateToken ||
+      candidateToken.type !== AuthTokenType.PASSWORD_RESET ||
+      candidateToken.usedAt !== null ||
+      candidateToken.expiresAt.getTime() <= now.getTime() ||
+      candidateToken.user.isActive !== true
+    ) {
+      throw buildBadRequestRpc('Invalid, expired, or already used password reset token');
+    }
+
+    const newPasswordHash = await hashPasswordArgon2id(payload.newPassword);
+
+    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const txNow = new Date();
+      const consumed = await tx.authToken.updateMany({
+        where: {
+          id: candidateToken.id,
+          type: AuthTokenType.PASSWORD_RESET,
+          usedAt: null,
+          expiresAt: { gt: txNow },
+        },
+        data: {
+          usedAt: txNow,
+        },
+      });
+
+      if (consumed.count !== 1) {
+        throw buildBadRequestRpc('Invalid, expired, or already used password reset token');
+      }
+
+      await tx.authToken.updateMany({
+        where: {
+          userId: candidateToken.userId,
+          type: AuthTokenType.PASSWORD_RESET,
+          usedAt: null,
+        },
+        data: {
+          usedAt: txNow,
+        },
+      });
+
+      await tx.user.update({
+        where: { id: candidateToken.userId },
+        data: {
+          passwordHash: newPasswordHash,
+        },
+      });
+
+      const revokedSessions = await tx.userSession.updateMany({
+        where: {
+          userId: candidateToken.userId,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: txNow,
+        },
+      });
+
+      await tx.authAuditLog.create({
+        data: {
+          userId: candidateToken.userId,
+          event: AuthAuditEvent.PASSWORD_RESET_COMPLETED,
+          ipAddress: audit.ipAddress,
+          userAgent: audit.userAgent,
+          requestId,
+          metadata: {
+            tokenId: candidateToken.id,
+            revokedSessionsCount: revokedSessions.count,
+          },
+        },
+      });
+    });
+
+    return {
+      message: 'Password has been reset successfully. Please log in with your new password.',
+    };
+  }
+
+  async getMe(context: InternalAuthContext): Promise<GetProfileResponse> {
+    const userId = requireAuthenticatedUserId(context);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        preferredCurrency: true,
+        timezone: true,
+        emailVerifiedAt: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user || !user.isActive || user.emailVerifiedAt === null) {
+      throw buildUnauthorizedRpc('Authenticated user is inactive, unverified, or does not exist');
+    }
+
+    return {
+      user: toRegisteredUserView(user),
+    };
+  }
+
+  async updateMe(
+    context: InternalAuthContext,
+    payload: UpdateProfileTcpPayload,
+  ): Promise<UpdateProfileResponse> {
+    const userId = requireAuthenticatedUserId(context);
+    const fullName = typeof payload.fullName === 'string' ? payload.fullName.trim() : '';
+    if (fullName.length === 0 || fullName.length > 150) {
+      throw buildBadRequestRpc('Invalid fullName');
+    }
+
+    const updatedUser = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const existing = await tx.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          isActive: true,
+          emailVerifiedAt: true,
+        },
+      });
+
+      if (!existing || !existing.isActive || existing.emailVerifiedAt === null) {
+        throw buildUnauthorizedRpc('Authenticated user is inactive, unverified, or does not exist');
+      }
+
+      return tx.user.update({
+        where: { id: userId },
+        data: { fullName },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          preferredCurrency: true,
+          timezone: true,
+          emailVerifiedAt: true,
+          isActive: true,
+          createdAt: true,
+        },
+      });
+    });
+
+    return {
+      user: toRegisteredUserView(updatedUser),
+      message: 'Profile updated successfully.',
+    };
+  }
+
+  async changePassword(
+    context: InternalAuthContext,
+    payload: ChangePasswordTcpPayload,
+  ): Promise<ChangePasswordResponse> {
+    const userId = requireAuthenticatedUserId(context);
+    const currentSessionId =
+      typeof payload.currentSessionId === 'string' ? payload.currentSessionId.trim() : '';
+    if (currentSessionId.length === 0) {
+      throw buildUnauthorizedRpc('Active session context is required');
+    }
+
+    if (typeof payload.currentPassword !== 'string' || payload.currentPassword.length === 0) {
+      throw buildBadRequestRpc('Current password is required');
+    }
+
+    this.assertStrongPassword(payload.newPassword);
+
+    const now = new Date();
+    const activeSession = await this.prisma.userSession.findFirst({
+      where: {
+        id: currentSessionId,
+        userId,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      select: { id: true },
+    });
+
+    if (!activeSession) {
+      throw buildUnauthorizedRpc('Current session is expired or has been revoked');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        passwordHash: true,
+        isActive: true,
+      },
+    });
+
+    if (!user || !user.isActive) {
+      throw buildUnauthorizedRpc('Authenticated user is inactive or does not exist');
+    }
+
+    const currentPasswordMatched = await verifyPasswordArgon2idConstantTime(
+      user.passwordHash,
+      payload.currentPassword,
+    );
+    if (!currentPasswordMatched) {
+      throw buildUnauthorizedRpc('Current password is incorrect');
+    }
+
+    if (payload.newPassword === payload.currentPassword) {
+      throw buildBadRequestRpc('New password must be different from current password');
+    }
+
+    const newPasswordHash = await hashPasswordArgon2id(payload.newPassword);
+    const audit = sanitizeAuditMetadata(payload.audit);
+    const requestId = sanitizeNullableString(context.requestId, MAX_REQUEST_ID_LENGTH);
+
+    const revokedOtherSessionsCount = await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const txNow = new Date();
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            passwordHash: newPasswordHash,
+          },
+        });
+
+        const revokedOthers = await tx.userSession.updateMany({
+          where: {
+            userId,
+            revokedAt: null,
+            id: { not: currentSessionId },
+          },
+          data: {
+            revokedAt: txNow,
+          },
+        });
+
+        await tx.authAuditLog.create({
+          data: {
+            userId,
+            event: AuthAuditEvent.PASSWORD_CHANGED,
+            ipAddress: audit.ipAddress,
+            userAgent: audit.userAgent,
+            requestId,
+            metadata: {
+              currentSessionId,
+              revokedOtherSessionsCount: revokedOthers.count,
+            },
+          },
+        });
+
+        return revokedOthers.count;
+      },
+    );
+
+    return {
+      revokedOtherSessionsCount,
+      message: 'Password changed successfully.',
+    };
+  }
+
+  private assertStrongPassword(password: string): void {
+    try {
+      assertValidPasswordInput(password);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid password';
+      throw buildBadRequestRpc(message);
+    }
+
+    if (!PASSWORD_POLICY_REGEX.test(password)) {
+      throw buildBadRequestRpc(
+        'Password must contain at least one uppercase letter, one lowercase letter, and one number',
+      );
+    }
+  }
+
+  private async dispatchPasswordResetEmailSafely(input: {
+    userId: string;
+    requestId: string | null;
+    to: string;
+    fullName: string;
+    rawToken: string;
+  }): Promise<void> {
+    try {
+      await this.emailSender.sendPasswordReset({
+        to: input.to,
+        fullName: input.fullName,
+        rawToken: input.rawToken,
+        expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'SMTP delivery failed';
+      this.logger.warn(
+        `Password reset email dispatch deferred for userId=${input.userId} requestId=${input.requestId ?? 'none'}: ${reason}`,
+      );
+    }
   }
 
   private async dispatchVerificationEmailSafely(input: {

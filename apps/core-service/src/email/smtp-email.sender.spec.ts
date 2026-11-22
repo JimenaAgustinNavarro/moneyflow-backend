@@ -88,4 +88,44 @@ describe('SmtpEmailSender', () => {
       }),
     ).rejects.toThrow('SMTP delivery failed (ECONNREFUSED)');
   });
+
+  it('sends password reset link with escaped fullName and sanitizes SMTP errors', async () => {
+    const sender = new SmtpEmailSender(buildConfigService());
+
+    await sender.sendPasswordReset({
+      to: 'ana@example.com',
+      fullName: 'Ana <Admin>',
+      rawToken: 'reset-secret-token',
+      expiresInMinutes: 60,
+    });
+
+    const mailCall = sendMailMock.mock.calls[0] as [
+      {
+        from: string;
+        to: string;
+        text: string;
+        html: string;
+      },
+    ];
+    const mailArgs = mailCall[0];
+    expect(mailArgs.to).toBe('ana@example.com');
+    expect(mailArgs.text).toContain(
+      'http://localhost:3001/reset-password?token=reset-secret-token',
+    );
+    expect(mailArgs.text).toContain('60 minutos');
+    expect(mailArgs.html).toContain('Ana &lt;Admin&gt;');
+
+    sendMailMock.mockRejectedValueOnce(
+      Object.assign(new Error('ETIMEDOUT super-secret-reset-token'), { code: 'ETIMEDOUT' }),
+    );
+
+    await expect(
+      sender.sendPasswordReset({
+        to: 'ana@example.com',
+        fullName: 'Ana',
+        rawToken: 'super-secret-reset-token',
+        expiresInMinutes: 60,
+      }),
+    ).rejects.toThrow('SMTP delivery failed (ETIMEDOUT)');
+  });
 });

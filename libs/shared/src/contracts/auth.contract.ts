@@ -8,6 +8,11 @@ export const AUTH_PATTERNS = {
   LIST_SESSIONS: 'auth.listSessions',
   REVOKE_SESSION: 'auth.revokeSession',
   LOGOUT_ALL: 'auth.logoutAll',
+  FORGOT_PASSWORD: 'auth.forgotPassword',
+  RESET_PASSWORD: 'auth.resetPassword',
+  GET_ME: 'auth.getMe',
+  UPDATE_ME: 'auth.updateMe',
+  CHANGE_PASSWORD: 'auth.changePassword',
 } as const;
 
 export const AUTH_ERROR_CODES = {
@@ -64,6 +69,30 @@ export interface RevokeSessionTcpPayload {
 }
 
 export interface LogoutAllTcpPayload {
+  audit: AuthAuditMetadata;
+}
+
+export interface ForgotPasswordTcpPayload {
+  email: string;
+  audit: AuthAuditMetadata;
+}
+
+export interface ResetPasswordTcpPayload {
+  token: string;
+  newPassword: string;
+  audit: AuthAuditMetadata;
+}
+
+export type GetProfileTcpPayload = Record<string, never>;
+
+export interface UpdateProfileTcpPayload {
+  fullName: string;
+}
+
+export interface ChangePasswordTcpPayload {
+  currentPassword: string;
+  newPassword: string;
+  currentSessionId: string;
   audit: AuthAuditMetadata;
 }
 
@@ -132,5 +161,27 @@ export interface RevokeSessionResponse {
 
 export interface LogoutAllResponse {
   revokedCount: number;
+  message: string;
+}
+
+export interface ForgotPasswordResponse {
+  message: string;
+}
+
+export interface ResetPasswordResponse {
+  message: string;
+}
+
+export interface GetProfileResponse {
+  user: RegisteredUserView;
+}
+
+export interface UpdateProfileResponse {
+  user: RegisteredUserView;
+  message: string;
+}
+
+export interface ChangePasswordResponse {
+  revokedOtherSessionsCount: number;
   message: string;
 }
