@@ -42,3 +42,6 @@ Thumbs.db
 *.db
 volumes/
 data/
+
+# Reglas locales del agente
+.agent/rules/protocolo-auditoria.md
