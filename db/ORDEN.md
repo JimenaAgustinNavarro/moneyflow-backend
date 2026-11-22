@@ -17,6 +17,7 @@ Control estricto y auditable de scripts SQL versionados ejecutados sobre `moneyf
 | Orden | Archivo | Tarjeta | Fecha (America/Lima) | Dependencias | Checksum (SHA-256) | Estado |
 |---|---|---|---|---|---|---|
 | `0001` | `0001_init_extensions.sql` | `MF-002` | `2026-11-21` | Ninguna (inicial) | `AD264B6AD0AD14D8A1BEFCF99379BF9FCD6D75FC9BD376873D5402AC861F0EC3` | Aplicada |
+| `0002` | `0002_auth_identity.sql` | `MF-005` | `2026-11-21` | `0001` | `C189582A612BD6FDDD190508FB6681D0E7E0F0F3C039B3047EEF3007F7982082` | Aplicada |
 
 ---
 
@@ -37,4 +38,25 @@ Control estricto y auditable de scripts SQL versionados ejecutados sobre `moneyf
   ```sql
   -- Solo si ninguna tabla o función posterior depende de pgcrypto:
   DROP EXTENSION IF EXISTS "pgcrypto";
+  ```
+
+### `0002_auth_identity.sql`
+- **Motivo:** Crear los tipos enum `auth_token_type` y `auth_audit_event`, y las tablas `users`, `user_sessions`, `auth_tokens` y `auth_audit_logs` con sus constraints de normalización, unicidad, integridad referencial e índices de búsqueda.
+- **Dependencias:** `0001_init_extensions.sql` aplicada (`pgcrypto` activo y zona horaria `America/Lima`).
+- **Comando de ejecución:**
+  ```powershell
+  Get-Content db/migrations/0002_auth_identity.sql -Raw | docker exec -i moneyflow-postgres psql -U postgres -d moneyflow_dev -v ON_ERROR_STOP=1
+  ```
+- **Validación:**
+  ```powershell
+  docker exec -i moneyflow-postgres psql -U postgres -d moneyflow_dev -c "\dt public.*" -c "\dT+ public.*"
+  ```
+- **Rollback:**
+  ```sql
+  DROP TABLE IF EXISTS public.auth_audit_logs;
+  DROP TABLE IF EXISTS public.auth_tokens;
+  DROP TABLE IF EXISTS public.user_sessions;
+  DROP TABLE IF EXISTS public.users;
+  DROP TYPE IF EXISTS public.auth_audit_event;
+  DROP TYPE IF EXISTS public.auth_token_type;
   ```

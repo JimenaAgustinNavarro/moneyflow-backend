@@ -9,7 +9,24 @@
 * 🟢 You can import this file directly.
 */
 
+export const AuthTokenType = {
+  EMAIL_VERIFICATION: 'EMAIL_VERIFICATION',
+  PASSWORD_RESET: 'PASSWORD_RESET'
+} as const
+
+export type AuthTokenType = (typeof AuthTokenType)[keyof typeof AuthTokenType]
 
 
-// This file is empty because there are no enums in the schema.
-export {}
+export const AuthAuditEvent = {
+  REGISTER: 'REGISTER',
+  LOGIN_SUCCESS: 'LOGIN_SUCCESS',
+  LOGIN_FAILED: 'LOGIN_FAILED',
+  LOGOUT: 'LOGOUT',
+  SESSION_REVOKED: 'SESSION_REVOKED',
+  EMAIL_VERIFIED: 'EMAIL_VERIFIED',
+  PASSWORD_RESET_REQUESTED: 'PASSWORD_RESET_REQUESTED',
+  PASSWORD_RESET_COMPLETED: 'PASSWORD_RESET_COMPLETED',
+  PASSWORD_CHANGED: 'PASSWORD_CHANGED'
+} as const
+
+export type AuthAuditEvent = (typeof AuthAuditEvent)[keyof typeof AuthAuditEvent]
