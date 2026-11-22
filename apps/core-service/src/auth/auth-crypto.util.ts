@@ -12,6 +12,9 @@ const ARGON2ID_OPTIONS = {
   parallelism: 1,
 } as const;
 
+const DUMMY_ARGON2ID_HASH =
+  '$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
 export function assertValidPasswordInput(plainPassword: string): void {
   if (typeof plainPassword !== 'string') {
     throw new Error('Password must be a string');
@@ -45,6 +48,30 @@ export async function verifyPasswordArgon2id(
   return argon2.verify(passwordHash, plainPassword);
 }
 
+export async function verifyPasswordArgon2idConstantTime(
+  passwordHash: string | null | undefined,
+  plainPassword: string,
+): Promise<boolean> {
+  if (
+    typeof plainPassword !== 'string' ||
+    plainPassword.length === 0 ||
+    plainPassword.length > MAX_PASSWORD_CHARS ||
+    Buffer.byteLength(plainPassword, 'utf8') > MAX_PASSWORD_BYTES
+  ) {
+    return false;
+  }
+
+  const hasValidHash = typeof passwordHash === 'string' && passwordHash.length > 0;
+  const targetHash = hasValidHash ? passwordHash : DUMMY_ARGON2ID_HASH;
+
+  try {
+    const matched = await argon2.verify(targetHash, plainPassword);
+    return hasValidHash && matched;
+  } catch {
+    return false;
+  }
+}
+
 export function hashOpaqueTokenSha256(rawToken: string): string {
   if (typeof rawToken !== 'string' || rawToken.trim().length === 0) {
     throw new Error('Token must be a non-empty string');
@@ -54,6 +81,12 @@ export function hashOpaqueTokenSha256(rawToken: string): string {
 }
 
 export function generateVerificationToken(): { rawToken: string; tokenHash: string } {
+  const rawToken = randomBytes(32).toString('hex');
+  const tokenHash = hashOpaqueTokenSha256(rawToken);
+  return { rawToken, tokenHash };
+}
+
+export function generateRefreshToken(): { rawToken: string; tokenHash: string } {
   const rawToken = randomBytes(32).toString('hex');
   const tokenHash = hashOpaqueTokenSha256(rawToken);
   return { rawToken, tokenHash };

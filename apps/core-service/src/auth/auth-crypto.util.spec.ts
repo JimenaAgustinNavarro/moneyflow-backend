@@ -1,9 +1,11 @@
 import {
   assertValidPasswordInput,
+  generateRefreshToken,
   generateVerificationToken,
   hashOpaqueTokenSha256,
   hashPasswordArgon2id,
   verifyPasswordArgon2id,
+  verifyPasswordArgon2idConstantTime,
 } from './auth-crypto.util';
 
 describe('auth-crypto.util', () => {
@@ -34,22 +36,28 @@ describe('auth-crypto.util', () => {
     const over512BytesPassword = 'A1a' + highByteChar.repeat(128);
     expect(over512BytesPassword.length).toBeGreaterThan(128);
     expect(() => assertValidPasswordInput(over512BytesPassword)).toThrow();
-
-    const exact128CharsOver512Bytes = 'A'.repeat(0) + '\u{1F600}'.repeat(65);
-    expect(exact128CharsOver512Bytes.length).toBe(130);
-
-    const under128CharsOver512Bytes = '😀'.repeat(129);
-    expect(under128CharsOver512Bytes.length).toBe(258);
   });
 
-  it('generates a 64-char hex rawToken and deterministic SHA-256 tokenHash', () => {
-    const first = generateVerificationToken();
-    const second = generateVerificationToken();
+  it('verifies login passwords in constant time without throwing on short passwords or missing hash', async () => {
+    const realHash = await hashPasswordArgon2id('SecurePass123');
 
-    expect(first.rawToken).toMatch(/^[0-9a-f]{64}$/);
-    expect(first.tokenHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(first.rawToken).not.toBe(first.tokenHash);
-    expect(first.rawToken).not.toBe(second.rawToken);
-    expect(hashOpaqueTokenSha256(first.rawToken)).toBe(first.tokenHash);
+    await expect(verifyPasswordArgon2idConstantTime(realHash, 'abc')).resolves.toBe(false);
+    await expect(verifyPasswordArgon2idConstantTime(null, 'abc')).resolves.toBe(false);
+    await expect(verifyPasswordArgon2idConstantTime(null, 'SecurePass123')).resolves.toBe(false);
+    await expect(verifyPasswordArgon2idConstantTime(realHash, 'A'.repeat(129))).resolves.toBe(
+      false,
+    );
+    await expect(verifyPasswordArgon2idConstantTime(realHash, 'SecurePass123')).resolves.toBe(true);
+  });
+
+  it('generates 64-char hex verification and refresh tokens with deterministic SHA-256 hashes', () => {
+    const verification = generateVerificationToken();
+    const refresh = generateRefreshToken();
+
+    expect(verification.rawToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(verification.tokenHash).toBe(hashOpaqueTokenSha256(verification.rawToken));
+    expect(refresh.rawToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(refresh.tokenHash).toBe(hashOpaqueTokenSha256(refresh.rawToken));
+    expect(refresh.rawToken).not.toBe(verification.rawToken);
   });
 });

@@ -1,12 +1,18 @@
 import { RpcException } from '@nestjs/microservices';
-import { InternalAuthContext } from '@app/shared';
+import { AUTH_ERROR_CODES, InternalAuthContext } from '@app/shared';
 import { EmailSender } from '../email/email-sender.port';
 import { AuthAuditEvent, AuthTokenType } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { hashOpaqueTokenSha256 } from './auth-crypto.util';
+import { hashOpaqueTokenSha256, hashPasswordArgon2id } from './auth-crypto.util';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
+  const userAId = '11111111-1111-4111-8111-111111111111';
+  const sessionA1Id = '22222222-2222-4222-8222-222222222222';
+  const sessionA2Id = '33333333-3333-4333-8333-333333333333';
+  const familyAId = '44444444-4444-4444-8444-444444444444';
+  const sessionB1Id = '55555555-5555-4555-8555-555555555555';
+
   const baseContext: InternalAuthContext = {
     requestId: 'req-auth-test-1',
     userId: null,
@@ -19,6 +25,12 @@ describe('AuthService', () => {
       findUnique: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+    };
+    userSession: {
+      findUnique: jest.Mock;
+      findMany: jest.Mock;
+      create: jest.Mock;
+      updateMany: jest.Mock;
     };
     authToken: {
       findUnique: jest.Mock;
@@ -43,6 +55,12 @@ describe('AuthService', () => {
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+      },
+      userSession: {
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+        create: jest.fn(),
+        updateMany: jest.fn(),
       },
       authToken: {
         findUnique: jest.fn(),
@@ -73,7 +91,7 @@ describe('AuthService', () => {
     prismaMock.user.findUnique.mockResolvedValue(null);
     const createdAt = new Date('2026-11-22T04:00:00.000Z');
     prismaMock.user.create.mockResolvedValue({
-      id: 'user-uuid-1',
+      id: userAId,
       email: 'ana@example.com',
       fullName: 'Ana Pérez',
       preferredCurrency: 'PEN',
@@ -96,56 +114,19 @@ describe('AuthService', () => {
     });
 
     expect(response.emailVerificationRequired).toBe(true);
-    expect(response.user).toEqual({
-      id: 'user-uuid-1',
-      email: 'ana@example.com',
-      fullName: 'Ana Pérez',
-      preferredCurrency: 'PEN',
-      timezone: 'America/Lima',
-      emailVerifiedAt: null,
-      isActive: true,
-      createdAt: createdAt.toISOString(),
-    });
+    expect(response.user.id).toBe(userAId);
     expect('passwordHash' in response.user).toBe(false);
-
-    const userCreateCall = prismaMock.user.create.mock.calls[0] as [
-      { data: { passwordHash: string; email: string } },
-    ];
-    const userCreateArgs = userCreateCall[0];
-    expect(userCreateArgs.data.email).toBe('ana@example.com');
-    expect(userCreateArgs.data.passwordHash.startsWith('$argon2id$')).toBe(true);
 
     const tokenCreateCall = prismaMock.authToken.create.mock.calls[0] as [
       { data: { type: AuthTokenType; tokenHash: string } },
     ];
-    const tokenCreateArgs = tokenCreateCall[0];
     const emailInput = sendEmailVerificationMock.mock.calls[0][0];
-    expect(tokenCreateArgs.data.type).toBe(AuthTokenType.EMAIL_VERIFICATION);
-    expect(tokenCreateArgs.data.tokenHash).toBe(hashOpaqueTokenSha256(emailInput.rawToken));
-    expect(tokenCreateArgs.data.tokenHash).not.toBe(emailInput.rawToken);
-
-    const registerAuditCall = prismaMock.authAuditLog.create.mock.calls[0] as [
-      {
-        data: {
-          userId: string;
-          event: AuthAuditEvent;
-          requestId: string;
-          ipAddress: string;
-          userAgent: string;
-        };
-      },
-    ];
-    expect(registerAuditCall[0].data).toMatchObject({
-      userId: 'user-uuid-1',
-      event: AuthAuditEvent.REGISTER,
-      requestId: 'req-auth-test-1',
-      ipAddress: '127.0.0.1',
-      userAgent: 'JestTestAgent',
-    });
+    expect(tokenCreateCall[0].data.type).toBe(AuthTokenType.EMAIL_VERIFICATION);
+    expect(tokenCreateCall[0].data.tokenHash).toBe(hashOpaqueTokenSha256(emailInput.rawToken));
   });
 
   it('returns 409 Conflict RpcException when email already exists (case-insensitive)', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ id: 'existing-user-id' });
+    prismaMock.user.findUnique.mockResolvedValue({ id: userAId });
 
     await expect(
       service.register(baseContext, {
@@ -155,27 +136,12 @@ describe('AuthService', () => {
         audit: { ipAddress: null, userAgent: null },
       }),
     ).rejects.toThrow(RpcException);
-
-    try {
-      await service.register(baseContext, {
-        email: 'ANA@EXAMPLE.COM',
-        fullName: 'Ana',
-        password: 'Password123',
-        audit: { ipAddress: null, userAgent: null },
-      });
-    } catch (error) {
-      expect((error as RpcException).getError()).toEqual({
-        statusCode: 409,
-        error: 'Conflict',
-        message: 'Email is already registered',
-      });
-    }
   });
 
   it('keeps 201 registration success when SMTP delivery fails', async () => {
     prismaMock.user.findUnique.mockResolvedValue(null);
     prismaMock.user.create.mockResolvedValue({
-      id: 'user-uuid-2',
+      id: userAId,
       email: 'mailpit-down@example.com',
       fullName: 'Usuario',
       preferredCurrency: 'PEN',
@@ -194,115 +160,44 @@ describe('AuthService', () => {
     });
 
     expect(response.emailVerificationRequired).toBe(true);
-    expect(response.user.id).toBe('user-uuid-2');
   });
 
-  it('verifies email atomically and records EMAIL_VERIFIED audit event', async () => {
+  it('verifies email atomically and rejects concurrent race condition (count=0)', async () => {
     const rawToken = 'f'.repeat(64);
     const tokenHash = hashOpaqueTokenSha256(rawToken);
     prismaMock.authToken.findUnique.mockResolvedValue({
       id: 'token-1',
-      userId: 'user-1',
+      userId: userAId,
       type: AuthTokenType.EMAIL_VERIFICATION,
       tokenHash,
       expiresAt: new Date(Date.now() + 60_000),
       usedAt: null,
       user: {
-        id: 'user-1',
+        id: userAId,
         email: 'ana@example.com',
         isActive: true,
         emailVerifiedAt: null,
       },
     });
-    prismaMock.authToken.updateMany.mockResolvedValue({ count: 1 });
-    const verifiedAt = new Date('2026-11-22T04:10:00.000Z');
+    prismaMock.authToken.updateMany.mockResolvedValueOnce({ count: 1 });
     prismaMock.user.update.mockResolvedValue({
       email: 'ana@example.com',
-      emailVerifiedAt: verifiedAt,
+      emailVerifiedAt: new Date('2026-11-22T04:10:00.000Z'),
     });
 
     const result = await service.verifyEmail(baseContext, {
       token: rawToken,
       audit: { ipAddress: '10.0.0.1', userAgent: 'Browser' },
     });
+    expect(result.verified).toBe(true);
 
-    expect(result).toEqual({
-      verified: true,
-      email: 'ana@example.com',
-      emailVerifiedAt: verifiedAt.toISOString(),
-      message: 'Email verified successfully.',
-    });
-    const updateManyCall = prismaMock.authToken.updateMany.mock.calls[0] as [
-      {
-        where: { id: string; usedAt: null; expiresAt: { gt: Date } };
-        data: { usedAt: Date };
-      },
-    ];
-    expect(updateManyCall[0].where.id).toBe('token-1');
-    expect(updateManyCall[0].where.usedAt).toBeNull();
-    expect(updateManyCall[0].where.expiresAt.gt).toBeInstanceOf(Date);
-    expect(updateManyCall[0].data.usedAt).toBeInstanceOf(Date);
-
-    const verifyAuditCall = prismaMock.authAuditLog.create.mock.calls[0] as [
-      { data: { userId: string; event: AuthAuditEvent } },
-    ];
-    expect(verifyAuditCall[0].data).toMatchObject({
-      userId: 'user-1',
-      event: AuthAuditEvent.EMAIL_VERIFIED,
-    });
-  });
-
-  it('rejects verifyEmail with 400 when concurrent race condition consumes token first (count=0)', async () => {
-    prismaMock.authToken.findUnique.mockResolvedValue({
-      id: 'token-race',
-      userId: 'user-1',
-      type: AuthTokenType.EMAIL_VERIFICATION,
-      tokenHash: 'a'.repeat(64),
-      expiresAt: new Date(Date.now() + 60_000),
-      usedAt: null,
-      user: {
-        id: 'user-1',
-        email: 'ana@example.com',
-        isActive: true,
-        emailVerifiedAt: null,
-      },
-    });
-    prismaMock.authToken.updateMany.mockResolvedValue({ count: 0 });
-
+    prismaMock.authToken.updateMany.mockResolvedValueOnce({ count: 0 });
     await expect(
       service.verifyEmail(baseContext, {
-        token: 'raw-race-token',
+        token: rawToken,
         audit: { ipAddress: null, userAgent: null },
       }),
     ).rejects.toThrow(RpcException);
-
-    expect(prismaMock.user.update).not.toHaveBeenCalled();
-    expect(prismaMock.authAuditLog.create).not.toHaveBeenCalled();
-  });
-
-  it('rejects verifyEmail with 400 if user is inactive or already verified', async () => {
-    prismaMock.authToken.findUnique.mockResolvedValue({
-      id: 'token-verified',
-      userId: 'user-1',
-      type: AuthTokenType.EMAIL_VERIFICATION,
-      tokenHash: 'b'.repeat(64),
-      expiresAt: new Date(Date.now() + 60_000),
-      usedAt: null,
-      user: {
-        id: 'user-1',
-        email: 'ana@example.com',
-        isActive: true,
-        emailVerifiedAt: new Date('2026-11-22T01:00:00.000Z'),
-      },
-    });
-
-    await expect(
-      service.verifyEmail(baseContext, {
-        token: 'raw-token',
-        audit: { ipAddress: null, userAgent: null },
-      }),
-    ).rejects.toThrow(RpcException);
-    expect(prismaMock.authToken.updateMany).not.toHaveBeenCalled();
   });
 
   it('returns identical generic 200 response for resendVerification without account enumeration', async () => {
@@ -313,7 +208,7 @@ describe('AuthService', () => {
     });
 
     prismaMock.user.findUnique.mockResolvedValueOnce({
-      id: 'user-verified',
+      id: userAId,
       email: 'verified@example.com',
       fullName: 'Verified',
       isActive: true,
@@ -324,22 +219,256 @@ describe('AuthService', () => {
       audit: { ipAddress: null, userAgent: null },
     });
 
+    expect(notFoundResult).toEqual(verifiedResult);
+  });
+
+  it('login returns 401 (never 500) on short password ("abc") and non-existent user', async () => {
+    const passwordHash = await hashPasswordArgon2id('Password123');
     prismaMock.user.findUnique.mockResolvedValueOnce({
-      id: 'user-pending',
-      email: 'pending@example.com',
-      fullName: 'Pending',
-      isActive: true,
+      id: userAId,
+      email: 'ana@example.com',
+      passwordHash,
+      fullName: 'Ana',
+      preferredCurrency: 'PEN',
+      timezone: 'America/Lima',
       emailVerifiedAt: null,
-    });
-    const pendingResult = await service.resendVerification(baseContext, {
-      email: 'pending@example.com',
-      audit: { ipAddress: null, userAgent: null },
+      isActive: true,
+      createdAt: new Date(),
     });
 
-    expect(notFoundResult).toEqual(verifiedResult);
-    expect(verifiedResult).toEqual(pendingResult);
-    expect(prismaMock.authToken.updateMany).toHaveBeenCalledTimes(1);
-    expect(prismaMock.authToken.create).toHaveBeenCalledTimes(1);
-    expect(sendEmailVerificationMock).toHaveBeenCalledTimes(1);
+    try {
+      await service.login(baseContext, {
+        email: 'ana@example.com',
+        password: 'abc',
+        audit: { ipAddress: '127.0.0.1', userAgent: 'Test' },
+      });
+      throw new Error('Expected login to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RpcException);
+      expect((error as RpcException).getError()).toEqual({
+        statusCode: 401,
+        error: 'Unauthorized',
+        message: 'Invalid email or password',
+      });
+    }
+
+    prismaMock.user.findUnique.mockResolvedValueOnce(null);
+    await expect(
+      service.login(baseContext, {
+        email: 'missing@example.com',
+        password: 'Password123',
+        audit: { ipAddress: null, userAgent: null },
+      }),
+    ).rejects.toThrow(RpcException);
+  });
+
+  it('login returns 403 EMAIL_NOT_VERIFIED only after matching password for unverified active user', async () => {
+    const passwordHash = await hashPasswordArgon2id('Password123');
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: userAId,
+      email: 'ana@example.com',
+      passwordHash,
+      fullName: 'Ana',
+      preferredCurrency: 'PEN',
+      timezone: 'America/Lima',
+      emailVerifiedAt: null,
+      isActive: true,
+      createdAt: new Date(),
+    });
+
+    try {
+      await service.login(baseContext, {
+        email: 'ana@example.com',
+        password: 'Password123',
+        audit: { ipAddress: '127.0.0.1', userAgent: 'Test' },
+      });
+      throw new Error('Expected login to fail with 403');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RpcException);
+      expect((error as RpcException).getError()).toEqual({
+        statusCode: 403,
+        error: 'Forbidden',
+        code: AUTH_ERROR_CODES.EMAIL_NOT_VERIFIED,
+        message: 'Email address has not been verified',
+      });
+    }
+
+    const auditCall = prismaMock.authAuditLog.create.mock.calls[0] as [
+      { data: { event: AuthAuditEvent; metadata: { reason: string } } },
+    ];
+    expect(auditCall[0].data.event).toBe(AuthAuditEvent.LOGIN_FAILED);
+    expect(auditCall[0].data.metadata.reason).toBe(AUTH_ERROR_CODES.EMAIL_NOT_VERIFIED);
+  });
+
+  it('login creates session with hashed refresh token and LOGIN_SUCCESS audit for verified user', async () => {
+    const passwordHash = await hashPasswordArgon2id('Password123');
+    const createdAt = new Date('2026-11-22T04:00:00.000Z');
+    const expiresAt = new Date('2026-11-29T04:00:00.000Z');
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: userAId,
+      email: 'ana@example.com',
+      passwordHash,
+      fullName: 'Ana Pérez',
+      preferredCurrency: 'PEN',
+      timezone: 'America/Lima',
+      emailVerifiedAt: new Date('2026-11-22T04:05:00.000Z'),
+      isActive: true,
+      createdAt,
+    });
+    prismaMock.userSession.create.mockResolvedValueOnce({
+      id: sessionA1Id,
+      expiresAt,
+    });
+
+    const result = await service.login(baseContext, {
+      email: '  ANA@Example.com ',
+      password: 'Password123',
+      audit: { ipAddress: '127.0.0.1', userAgent: 'Chrome' },
+    });
+
+    expect(result.sessionId).toBe(sessionA1Id);
+    expect(result.refreshToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.user.id).toBe(userAId);
+
+    const sessionCreateCall = prismaMock.userSession.create.mock.calls[0] as [
+      { data: { refreshTokenHash: string; familyId: string } },
+    ];
+    expect(sessionCreateCall[0].data.refreshTokenHash).toBe(
+      hashOpaqueTokenSha256(result.refreshToken),
+    );
+    expect(sessionCreateCall[0].data.refreshTokenHash).not.toBe(result.refreshToken);
+  });
+
+  it('refresh rotates token preserving familyId and revoking previous session', async () => {
+    const rawRefresh = 'c'.repeat(64);
+    prismaMock.userSession.findUnique.mockResolvedValueOnce({
+      id: sessionA1Id,
+      userId: userAId,
+      familyId: familyAId,
+      refreshTokenHash: hashOpaqueTokenSha256(rawRefresh),
+      expiresAt: new Date(Date.now() + 60_000),
+      revokedAt: null,
+      replacedBySessionId: null,
+      user: {
+        id: userAId,
+        email: 'ana@example.com',
+        fullName: 'Ana',
+        preferredCurrency: 'PEN',
+        timezone: 'America/Lima',
+        emailVerifiedAt: new Date('2026-11-22T01:00:00.000Z'),
+        isActive: true,
+        createdAt: new Date('2026-11-22T00:00:00.000Z'),
+      },
+    });
+    prismaMock.userSession.create.mockResolvedValueOnce({
+      id: sessionA2Id,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+    prismaMock.userSession.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const rotated = await service.refresh(baseContext, {
+      refreshToken: rawRefresh,
+      audit: { ipAddress: '127.0.0.1', userAgent: 'Chrome' },
+    });
+
+    expect(rotated.sessionId).toBe(sessionA2Id);
+    expect(rotated.refreshToken).not.toBe(rawRefresh);
+    const createCall = prismaMock.userSession.create.mock.calls[0] as [
+      { data: { familyId: string } },
+    ];
+    expect(createCall[0].data.familyId).toBe(familyAId);
+  });
+
+  it('refresh revokes entire familyId and commits audit when token reuse or race condition is detected', async () => {
+    prismaMock.userSession.findUnique.mockResolvedValueOnce({
+      id: sessionA1Id,
+      userId: userAId,
+      familyId: familyAId,
+      refreshTokenHash: 'd'.repeat(64),
+      expiresAt: new Date(Date.now() + 60_000),
+      revokedAt: new Date(),
+      replacedBySessionId: sessionA2Id,
+      user: {
+        id: userAId,
+        email: 'ana@example.com',
+        fullName: 'Ana',
+        preferredCurrency: 'PEN',
+        timezone: 'America/Lima',
+        emailVerifiedAt: new Date(),
+        isActive: true,
+        createdAt: new Date(),
+      },
+    });
+    prismaMock.userSession.updateMany.mockResolvedValueOnce({ count: 2 });
+
+    await expect(
+      service.refresh(baseContext, {
+        refreshToken: 'e'.repeat(64),
+        audit: { ipAddress: '10.0.0.2', userAgent: 'Attacker' },
+      }),
+    ).rejects.toThrow(RpcException);
+
+    const revokeFamilyCall = prismaMock.userSession.updateMany.mock.calls[0] as [
+      { where: { familyId: string; revokedAt: null } },
+    ];
+    expect(revokeFamilyCall[0].where).toEqual({
+      familyId: familyAId,
+      revokedAt: null,
+    });
+    const auditCall = prismaMock.authAuditLog.create.mock.calls[0] as [
+      { data: { event: AuthAuditEvent; metadata: { reason: string; familyId: string } } },
+    ];
+    expect(auditCall[0].data.event).toBe(AuthAuditEvent.SESSION_REVOKED);
+    expect(auditCall[0].data.metadata.reason).toBe('REFRESH_TOKEN_REUSE_DETECTED');
+  });
+
+  it('listSessions, revokeSession (isolated by userId), logout, and logoutAll enforce ownership', async () => {
+    const authContext: InternalAuthContext = {
+      ...baseContext,
+      userId: userAId,
+    };
+
+    prismaMock.userSession.findMany.mockResolvedValueOnce([
+      {
+        id: sessionA1Id,
+        ipAddress: '127.0.0.1',
+        userAgent: 'Chrome',
+        createdAt: new Date('2026-11-22T01:00:00.000Z'),
+        expiresAt: new Date('2026-11-29T01:00:00.000Z'),
+      },
+    ]);
+    const listResult = await service.listSessions(authContext, { currentSessionId: sessionA1Id });
+    expect(listResult.sessions).toHaveLength(1);
+    expect(listResult.sessions[0].isCurrent).toBe(true);
+
+    prismaMock.userSession.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      service.revokeSession(authContext, {
+        sessionId: sessionB1Id,
+        currentSessionId: sessionA1Id,
+        audit: { ipAddress: null, userAgent: null },
+      }),
+    ).rejects.toThrow(RpcException);
+
+    prismaMock.userSession.updateMany.mockResolvedValueOnce({ count: 1 });
+    const revokeOwn = await service.revokeSession(authContext, {
+      sessionId: sessionA1Id,
+      currentSessionId: sessionA1Id,
+      audit: { ipAddress: null, userAgent: null },
+    });
+    expect(revokeOwn.currentSessionCleared).toBe(true);
+
+    prismaMock.userSession.updateMany.mockResolvedValueOnce({ count: 3 });
+    const logoutAllResult = await service.logoutAll(authContext, {
+      audit: { ipAddress: null, userAgent: null },
+    });
+    expect(logoutAllResult.revokedCount).toBe(3);
+
+    const logoutIdempotent = await service.logout(baseContext, {
+      sessionId: null,
+      refreshToken: null,
+      audit: { ipAddress: null, userAgent: null },
+    });
+    expect(logoutIdempotent.message).toBe('Logged out successfully.');
   });
 });

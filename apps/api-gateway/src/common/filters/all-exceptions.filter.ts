@@ -11,6 +11,7 @@ import { Request, Response } from 'express';
 interface ErrorResponseBody {
   statusCode: number;
   error: string;
+  code?: string;
   message: string | string[];
   timestamp: string;
   path: string;
@@ -27,6 +28,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let error = 'Internal Server Error';
+    let code: string | undefined;
     let message: string | string[] = 'Internal server error';
 
     if (exception instanceof HttpException) {
@@ -35,13 +37,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
       if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
-        error = exception.name;
+        error = status === HttpStatus.TOO_MANY_REQUESTS ? 'Too Many Requests' : exception.name;
       } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
         const body = exceptionResponse as Record<string, unknown>;
         if (typeof body.error === 'string') {
           error = body.error;
         } else {
-          error = exception.name;
+          error = status === HttpStatus.TOO_MANY_REQUESTS ? 'Too Many Requests' : exception.name;
+        }
+
+        if (typeof body.code === 'string' && body.code.length > 0) {
+          code = body.code;
         }
 
         if (typeof body.message === 'string' || Array.isArray(body.message)) {
@@ -55,12 +61,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR && !(exception instanceof HttpException)) {
       error = 'Internal Server Error';
+      code = undefined;
       message = 'Internal server error';
     }
 
     const payload: ErrorResponseBody = {
       statusCode: status,
       error,
+      ...(code ? { code } : {}),
       message,
       timestamp: new Date().toISOString(),
       path: request.url,

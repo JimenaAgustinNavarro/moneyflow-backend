@@ -1,24 +1,61 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Req,
+  Res,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   AUTH_PATTERNS,
+  CoreAuthSessionResult,
+  ListSessionsResponse,
+  ListSessionsTcpPayload,
+  LoginTcpPayload,
+  LogoutAllResponse,
+  LogoutAllTcpPayload,
+  LogoutResponse,
+  LogoutTcpPayload,
+  PublicAuthResponse,
+  RefreshSessionTcpPayload,
   RegisterUserResponse,
   RegisterUserTcpPayload,
   ResendVerificationResponse,
   ResendVerificationTcpPayload,
+  RevokeSessionResponse,
+  RevokeSessionTcpPayload,
   VerifyEmailResponse,
   VerifyEmailTcpPayload,
 } from '@app/shared';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { CoreTcpClientService } from '../core-client/core-tcp-client.service';
+import { AuthCookiesService } from './auth-cookies.service';
+import { AuthJwtService, AuthenticatedGatewayUser } from './auth-jwt.service';
+import { CurrentUser } from './decorators/current-user.decorator';
+import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { SessionIdParamDto } from './dto/session-id-param.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly coreTcpClient: CoreTcpClientService) {}
+  constructor(
+    private readonly coreTcpClient: CoreTcpClientService,
+    private readonly authCookiesService: AuthCookiesService,
+    private readonly authJwtService: AuthJwtService,
+  ) {}
 
   @Post('register')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(HttpStatus.CREATED)
   register(@Body() dto: RegisterDto, @Req() request: Request): Promise<RegisterUserResponse> {
     const context = this.coreTcpClient.buildRequestContext(request, null);
@@ -59,6 +96,7 @@ export class AuthController {
   }
 
   @Post('resend-verification')
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   resendVerification(
     @Body() dto: ResendVerificationDto,
@@ -78,5 +116,202 @@ export class AuthController {
         userId: null,
       },
     );
+  }
+
+  @Post('login')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  async login(
+    @Body() dto: LoginDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<PublicAuthResponse> {
+    const context = this.coreTcpClient.buildRequestContext(request, null);
+    const payload: LoginTcpPayload = {
+      email: dto.email,
+      password: dto.password,
+      audit: context.audit,
+    };
+
+    const result = await this.coreTcpClient.send<CoreAuthSessionResult, LoginTcpPayload>(
+      AUTH_PATTERNS.LOGIN,
+      payload,
+      {
+        requestId: context.requestId,
+        userId: null,
+      },
+    );
+
+    const accessToken = await this.authJwtService.signAccessToken(result.user.id, result.sessionId);
+    this.authCookiesService.setAuthCookies(response, accessToken, result.refreshToken);
+
+    return {
+      user: result.user,
+      message: 'Login successful.',
+    };
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  async refresh(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<PublicAuthResponse> {
+    const refreshToken = this.authCookiesService.getRefreshTokenFromRequest(request);
+    if (!refreshToken) {
+      this.authCookiesService.clearAuthCookies(response);
+      throw new UnauthorizedException('Refresh token cookie is missing');
+    }
+
+    const context = this.coreTcpClient.buildRequestContext(request, null);
+    const payload: RefreshSessionTcpPayload = {
+      refreshToken,
+      audit: context.audit,
+    };
+
+    try {
+      const result = await this.coreTcpClient.send<CoreAuthSessionResult, RefreshSessionTcpPayload>(
+        AUTH_PATTERNS.REFRESH,
+        payload,
+        {
+          requestId: context.requestId,
+          userId: null,
+        },
+      );
+
+      const accessToken = await this.authJwtService.signAccessToken(
+        result.user.id,
+        result.sessionId,
+      );
+      this.authCookiesService.setAuthCookies(response, accessToken, result.refreshToken);
+
+      return {
+        user: result.user,
+        message: 'Session refreshed successfully.',
+      };
+    } catch (error) {
+      this.authCookiesService.clearAuthCookies(response);
+      throw error;
+    }
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  async logout(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<LogoutResponse> {
+    const refreshToken = this.authCookiesService.getRefreshTokenFromRequest(request);
+    const rawAccessToken = this.authCookiesService.getAccessTokenFromRequest(request);
+
+    let verifiedUser: AuthenticatedGatewayUser | null = null;
+    if (rawAccessToken) {
+      try {
+        verifiedUser = await this.authJwtService.verifyAccessToken(rawAccessToken);
+      } catch {
+        verifiedUser = null;
+      }
+    }
+
+    const context = this.coreTcpClient.buildRequestContext(request, verifiedUser?.userId ?? null);
+    const payload: LogoutTcpPayload = {
+      sessionId: verifiedUser?.sessionId ?? null,
+      refreshToken,
+      audit: context.audit,
+    };
+
+    try {
+      return await this.coreTcpClient.send<LogoutResponse, LogoutTcpPayload>(
+        AUTH_PATTERNS.LOGOUT,
+        payload,
+        {
+          requestId: context.requestId,
+          userId: verifiedUser?.userId ?? null,
+        },
+      );
+    } finally {
+      this.authCookiesService.clearAuthCookies(response);
+    }
+  }
+
+  @Get('sessions')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  listSessions(
+    @CurrentUser() currentUser: AuthenticatedGatewayUser,
+    @Req() request: Request,
+  ): Promise<ListSessionsResponse> {
+    const context = this.coreTcpClient.buildRequestContext(request, currentUser.userId);
+    const payload: ListSessionsTcpPayload = {
+      currentSessionId: currentUser.sessionId,
+    };
+
+    return this.coreTcpClient.send<ListSessionsResponse, ListSessionsTcpPayload>(
+      AUTH_PATTERNS.LIST_SESSIONS,
+      payload,
+      {
+        requestId: context.requestId,
+        userId: currentUser.userId,
+      },
+    );
+  }
+
+  @Delete('sessions/:id')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async revokeSession(
+    @Param() params: SessionIdParamDto,
+    @CurrentUser() currentUser: AuthenticatedGatewayUser,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<RevokeSessionResponse> {
+    const context = this.coreTcpClient.buildRequestContext(request, currentUser.userId);
+    const payload: RevokeSessionTcpPayload = {
+      sessionId: params.id,
+      currentSessionId: currentUser.sessionId,
+      audit: context.audit,
+    };
+
+    const result = await this.coreTcpClient.send<RevokeSessionResponse, RevokeSessionTcpPayload>(
+      AUTH_PATTERNS.REVOKE_SESSION,
+      payload,
+      {
+        requestId: context.requestId,
+        userId: currentUser.userId,
+      },
+    );
+
+    if (result.currentSessionCleared) {
+      this.authCookiesService.clearAuthCookies(response);
+    }
+
+    return result;
+  }
+
+  @Post('logout-all')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async logoutAll(
+    @CurrentUser() currentUser: AuthenticatedGatewayUser,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<LogoutAllResponse> {
+    const context = this.coreTcpClient.buildRequestContext(request, currentUser.userId);
+    const payload: LogoutAllTcpPayload = {
+      audit: context.audit,
+    };
+
+    try {
+      return await this.coreTcpClient.send<LogoutAllResponse, LogoutAllTcpPayload>(
+        AUTH_PATTERNS.LOGOUT_ALL,
+        payload,
+        {
+          requestId: context.requestId,
+          userId: currentUser.userId,
+        },
+      );
+    } finally {
+      this.authCookiesService.clearAuthCookies(response);
+    }
   }
 }

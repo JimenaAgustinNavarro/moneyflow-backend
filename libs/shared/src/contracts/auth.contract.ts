@@ -2,6 +2,16 @@ export const AUTH_PATTERNS = {
   REGISTER: 'auth.register',
   VERIFY_EMAIL: 'auth.verifyEmail',
   RESEND_VERIFICATION: 'auth.resendVerification',
+  LOGIN: 'auth.login',
+  REFRESH: 'auth.refresh',
+  LOGOUT: 'auth.logout',
+  LIST_SESSIONS: 'auth.listSessions',
+  REVOKE_SESSION: 'auth.revokeSession',
+  LOGOUT_ALL: 'auth.logoutAll',
+} as const;
+
+export const AUTH_ERROR_CODES = {
+  EMAIL_NOT_VERIFIED: 'EMAIL_NOT_VERIFIED',
 } as const;
 
 export interface AuthAuditMetadata {
@@ -23,6 +33,37 @@ export interface VerifyEmailTcpPayload {
 
 export interface ResendVerificationTcpPayload {
   email: string;
+  audit: AuthAuditMetadata;
+}
+
+export interface LoginTcpPayload {
+  email: string;
+  password: string;
+  audit: AuthAuditMetadata;
+}
+
+export interface RefreshSessionTcpPayload {
+  refreshToken: string;
+  audit: AuthAuditMetadata;
+}
+
+export interface LogoutTcpPayload {
+  sessionId: string | null;
+  refreshToken: string | null;
+  audit: AuthAuditMetadata;
+}
+
+export interface ListSessionsTcpPayload {
+  currentSessionId: string;
+}
+
+export interface RevokeSessionTcpPayload {
+  sessionId: string;
+  currentSessionId: string;
+  audit: AuthAuditMetadata;
+}
+
+export interface LogoutAllTcpPayload {
   audit: AuthAuditMetadata;
 }
 
@@ -51,5 +92,45 @@ export interface VerifyEmailResponse {
 }
 
 export interface ResendVerificationResponse {
+  message: string;
+}
+
+export interface CoreAuthSessionResult {
+  user: RegisteredUserView;
+  sessionId: string;
+  refreshToken: string;
+  refreshTokenExpiresAt: string;
+}
+
+export interface PublicAuthResponse {
+  user: RegisteredUserView;
+  message: string;
+}
+
+export interface LogoutResponse {
+  message: string;
+}
+
+export interface UserSessionView {
+  id: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  expiresAt: string;
+  isCurrent: boolean;
+}
+
+export interface ListSessionsResponse {
+  sessions: UserSessionView[];
+}
+
+export interface RevokeSessionResponse {
+  revokedSessionId: string;
+  currentSessionCleared: boolean;
+  message: string;
+}
+
+export interface LogoutAllResponse {
+  revokedCount: number;
   message: string;
 }

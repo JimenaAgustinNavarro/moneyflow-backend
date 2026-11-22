@@ -1,5 +1,6 @@
 import { Controller, Get, Inject, Query, ServiceUnavailableException } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { SkipThrottle } from '@nestjs/throttler';
 import { CORE_PATTERNS, CoreHealthResponse, GatewayHealthResponse } from '@app/shared';
 import { catchError, firstValueFrom, timeout } from 'rxjs';
 import { HealthQueryDto } from './dto/health-query.dto';
@@ -7,6 +8,7 @@ import { HealthQueryDto } from './dto/health-query.dto';
 export const CORE_SERVICE_CLIENT = 'CORE_SERVICE_CLIENT';
 const HEALTH_TCP_TIMEOUT_MS = 3000;
 
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(

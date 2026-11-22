@@ -28,6 +28,7 @@ export interface CoreTcpRequestContext {
 interface StructuredRpcError {
   statusCode: number;
   error?: string;
+  code?: string;
   message: string | string[];
 }
 
@@ -43,8 +44,9 @@ function isStructuredRpcError(candidate: unknown): candidate is StructuredRpcErr
     record.statusCode >= 400 &&
     record.statusCode <= 599;
   const hasValidMessage = typeof record.message === 'string' || Array.isArray(record.message);
+  const hasValidCode = record.code === undefined || typeof record.code === 'string';
 
-  return hasValidStatus && hasValidMessage;
+  return hasValidStatus && hasValidMessage && hasValidCode;
 }
 
 function extractRpcErrorPayload(error: unknown): StructuredRpcError | null {
@@ -160,6 +162,7 @@ export class CoreTcpClientService {
               {
                 statusCode: rpcError.statusCode,
                 error: rpcError.error ?? 'Error',
+                ...(rpcError.code ? { code: rpcError.code } : {}),
                 message: rpcError.message,
               },
               rpcError.statusCode,
