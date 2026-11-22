@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
 import { OriginCsrfGuard } from './common/guards/origin-csrf.guard';
+import { FundsModule } from './funds/funds.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -21,6 +22,7 @@ import { HealthModule } from './health/health.module';
     HealthModule,
     AuthModule,
     CategoriesModule,
+    FundsModule,
   ],
   providers: [
     {
