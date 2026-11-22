@@ -59,3 +59,52 @@ export type AuthToken = Prisma.AuthTokenModel
  * 
  */
 export type AuthAuditLog = Prisma.AuthAuditLogModel
+/**
+ * Model Fund
+ * Fondo virtual del usuario. Prohibido almacenar balance mutable; el saldo se deriva de SUM(fund_entries.signed_amount).
+ * SQL adicional en 0003_financial_core.sql:
+ * - CHECK (LENGTH(BTRIM(name)) > 0)
+ * - UNIQUE parcial: (user_id, LOWER(BTRIM(name))) WHERE is_archived = FALSE
+ * - UNIQUE (id, user_id) y UNIQUE (id, user_id, currency) para FKs compuestas en fund_entries
+ */
+export type Fund = Prisma.FundModel
+/**
+ * Model Category
+ * Categoría de ingreso o egreso (global de sistema cuando isSystem = true y userId = null, o propia del usuario).
+ * SQL adicional en 0003_financial_core.sql:
+ * - CHECK (LENGTH(BTRIM(name)) > 0)
+ * - CHECK ((is_system = TRUE AND user_id IS NULL) OR (is_system = FALSE AND user_id IS NOT NULL))
+ * - UNIQUE parcial sistema: (kind, LOWER(BTRIM(name))) WHERE is_system = TRUE AND is_archived = FALSE
+ * - UNIQUE parcial usuario: (user_id, kind, LOWER(BTRIM(name))) WHERE is_system = FALSE AND is_archived = FALSE
+ */
+export type Category = Prisma.CategoryModel
+/**
+ * Model FinancialTransaction
+ * Cabecera de transacción financiera. occurredOn es DATE calendario en America/Lima; recordedAt es TIMESTAMPTZ técnico.
+ * SQL adicional en 0003_financial_core.sql:
+ * - CHECK (amount > 0), CHECK (LENGTH(BTRIM(description)) > 0)
+ * - CHECK (idempotency_key IS NULL OR LENGTH(BTRIM(idempotency_key)) > 0)
+ * - CHECK (related_transaction_id IS NULL OR related_transaction_id <> id)
+ * - CHECK ((type IN ('VOID', 'REFUND') AND related_transaction_id IS NOT NULL) OR (type NOT IN ('VOID', 'REFUND') AND related_transaction_id IS NULL))
+ * - UNIQUE parcial idempotencia: (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+ * - UNIQUE parcial anti doble-VOID: (related_transaction_id) WHERE type = 'VOID' AND related_transaction_id IS NOT NULL
+ * - FK compuesta (related_transaction_id, user_id) -> financial_transactions(id, user_id) ON DELETE RESTRICT
+ */
+export type FinancialTransaction = Prisma.FinancialTransactionModel
+/**
+ * Model FundEntry
+ * Asiento inmutable en el ledger por fondo.
+ * SQL adicional en 0003_financial_core.sql:
+ * - CHECK (signed_amount <> 0)
+ * - FK compuesta (transaction_id, user_id, currency) -> financial_transactions(id, user_id, currency) ON DELETE RESTRICT
+ * - FK compuesta (fund_id, user_id, currency) -> funds(id, user_id, currency) ON DELETE RESTRICT
+ */
+export type FundEntry = Prisma.FundEntryModel
+/**
+ * Model TransactionSplit
+ * Desglose de una transacción en múltiples categorías.
+ * SQL adicional en 0003_financial_core.sql:
+ * - CHECK (amount > 0)
+ * - FK compuesta (transaction_id, user_id) -> financial_transactions(id, user_id) ON DELETE RESTRICT
+ */
+export type TransactionSplit = Prisma.TransactionSplitModel

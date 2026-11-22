@@ -225,6 +225,11 @@ export type UserWhereInput = {
   sessions?: Prisma.UserSessionListRelationFilter
   authTokens?: Prisma.AuthTokenListRelationFilter
   auditLogs?: Prisma.AuthAuditLogListRelationFilter
+  funds?: Prisma.FundListRelationFilter
+  categories?: Prisma.CategoryListRelationFilter
+  financialTransactions?: Prisma.FinancialTransactionListRelationFilter
+  fundEntries?: Prisma.FundEntryListRelationFilter
+  transactionSplits?: Prisma.TransactionSplitListRelationFilter
 }
 
 export type UserOrderByWithRelationInput = {
@@ -241,6 +246,11 @@ export type UserOrderByWithRelationInput = {
   sessions?: Prisma.UserSessionOrderByRelationAggregateInput
   authTokens?: Prisma.AuthTokenOrderByRelationAggregateInput
   auditLogs?: Prisma.AuthAuditLogOrderByRelationAggregateInput
+  funds?: Prisma.FundOrderByRelationAggregateInput
+  categories?: Prisma.CategoryOrderByRelationAggregateInput
+  financialTransactions?: Prisma.FinancialTransactionOrderByRelationAggregateInput
+  fundEntries?: Prisma.FundEntryOrderByRelationAggregateInput
+  transactionSplits?: Prisma.TransactionSplitOrderByRelationAggregateInput
 }
 
 export type UserWhereUniqueInput = Prisma.AtLeast<{
@@ -260,6 +270,11 @@ export type UserWhereUniqueInput = Prisma.AtLeast<{
   sessions?: Prisma.UserSessionListRelationFilter
   authTokens?: Prisma.AuthTokenListRelationFilter
   auditLogs?: Prisma.AuthAuditLogListRelationFilter
+  funds?: Prisma.FundListRelationFilter
+  categories?: Prisma.CategoryListRelationFilter
+  financialTransactions?: Prisma.FinancialTransactionListRelationFilter
+  fundEntries?: Prisma.FundEntryListRelationFilter
+  transactionSplits?: Prisma.TransactionSplitListRelationFilter
 }, "id" | "email">
 
 export type UserOrderByWithAggregationInput = {
@@ -308,6 +323,11 @@ export type UserCreateInput = {
   sessions?: Prisma.UserSessionCreateNestedManyWithoutUserInput
   authTokens?: Prisma.AuthTokenCreateNestedManyWithoutUserInput
   auditLogs?: Prisma.AuthAuditLogCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitCreateNestedManyWithoutUserInput
 }
 
 export type UserUncheckedCreateInput = {
@@ -324,6 +344,11 @@ export type UserUncheckedCreateInput = {
   sessions?: Prisma.UserSessionUncheckedCreateNestedManyWithoutUserInput
   authTokens?: Prisma.AuthTokenUncheckedCreateNestedManyWithoutUserInput
   auditLogs?: Prisma.AuthAuditLogUncheckedCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundUncheckedCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryUncheckedCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryUncheckedCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedCreateNestedManyWithoutUserInput
 }
 
 export type UserUpdateInput = {
@@ -340,6 +365,11 @@ export type UserUpdateInput = {
   sessions?: Prisma.UserSessionUpdateManyWithoutUserNestedInput
   authTokens?: Prisma.AuthTokenUpdateManyWithoutUserNestedInput
   auditLogs?: Prisma.AuthAuditLogUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUpdateManyWithoutUserNestedInput
 }
 
 export type UserUncheckedUpdateInput = {
@@ -356,6 +386,11 @@ export type UserUncheckedUpdateInput = {
   sessions?: Prisma.UserSessionUncheckedUpdateManyWithoutUserNestedInput
   authTokens?: Prisma.AuthTokenUncheckedUpdateManyWithoutUserNestedInput
   auditLogs?: Prisma.AuthAuditLogUncheckedUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUncheckedUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUncheckedUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUncheckedUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedUpdateManyWithoutUserNestedInput
 }
 
 export type UserCreateManyInput = {
@@ -506,6 +541,78 @@ export type UserUpdateOneWithoutAuditLogsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutAuditLogsInput, Prisma.UserUpdateWithoutAuditLogsInput>, Prisma.UserUncheckedUpdateWithoutAuditLogsInput>
 }
 
+export type UserCreateNestedOneWithoutFundsInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutFundsInput, Prisma.UserUncheckedCreateWithoutFundsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutFundsInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneRequiredWithoutFundsNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutFundsInput, Prisma.UserUncheckedCreateWithoutFundsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutFundsInput
+  upsert?: Prisma.UserUpsertWithoutFundsInput
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutFundsInput, Prisma.UserUpdateWithoutFundsInput>, Prisma.UserUncheckedUpdateWithoutFundsInput>
+}
+
+export type UserCreateNestedOneWithoutCategoriesInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutCategoriesInput, Prisma.UserUncheckedCreateWithoutCategoriesInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutCategoriesInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneWithoutCategoriesNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutCategoriesInput, Prisma.UserUncheckedCreateWithoutCategoriesInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutCategoriesInput
+  upsert?: Prisma.UserUpsertWithoutCategoriesInput
+  disconnect?: Prisma.UserWhereInput | boolean
+  delete?: Prisma.UserWhereInput | boolean
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutCategoriesInput, Prisma.UserUpdateWithoutCategoriesInput>, Prisma.UserUncheckedUpdateWithoutCategoriesInput>
+}
+
+export type UserCreateNestedOneWithoutFinancialTransactionsInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutFinancialTransactionsInput, Prisma.UserUncheckedCreateWithoutFinancialTransactionsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutFinancialTransactionsInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneRequiredWithoutFinancialTransactionsNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutFinancialTransactionsInput, Prisma.UserUncheckedCreateWithoutFinancialTransactionsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutFinancialTransactionsInput
+  upsert?: Prisma.UserUpsertWithoutFinancialTransactionsInput
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutFinancialTransactionsInput, Prisma.UserUpdateWithoutFinancialTransactionsInput>, Prisma.UserUncheckedUpdateWithoutFinancialTransactionsInput>
+}
+
+export type UserCreateNestedOneWithoutFundEntriesInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutFundEntriesInput, Prisma.UserUncheckedCreateWithoutFundEntriesInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutFundEntriesInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneRequiredWithoutFundEntriesNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutFundEntriesInput, Prisma.UserUncheckedCreateWithoutFundEntriesInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutFundEntriesInput
+  upsert?: Prisma.UserUpsertWithoutFundEntriesInput
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutFundEntriesInput, Prisma.UserUpdateWithoutFundEntriesInput>, Prisma.UserUncheckedUpdateWithoutFundEntriesInput>
+}
+
+export type UserCreateNestedOneWithoutTransactionSplitsInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutTransactionSplitsInput, Prisma.UserUncheckedCreateWithoutTransactionSplitsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutTransactionSplitsInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneRequiredWithoutTransactionSplitsNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutTransactionSplitsInput, Prisma.UserUncheckedCreateWithoutTransactionSplitsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutTransactionSplitsInput
+  upsert?: Prisma.UserUpsertWithoutTransactionSplitsInput
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutTransactionSplitsInput, Prisma.UserUpdateWithoutTransactionSplitsInput>, Prisma.UserUncheckedUpdateWithoutTransactionSplitsInput>
+}
+
 export type UserCreateWithoutSessionsInput = {
   id?: string
   email: string
@@ -519,6 +626,11 @@ export type UserCreateWithoutSessionsInput = {
   updatedAt?: Date | string
   authTokens?: Prisma.AuthTokenCreateNestedManyWithoutUserInput
   auditLogs?: Prisma.AuthAuditLogCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitCreateNestedManyWithoutUserInput
 }
 
 export type UserUncheckedCreateWithoutSessionsInput = {
@@ -534,6 +646,11 @@ export type UserUncheckedCreateWithoutSessionsInput = {
   updatedAt?: Date | string
   authTokens?: Prisma.AuthTokenUncheckedCreateNestedManyWithoutUserInput
   auditLogs?: Prisma.AuthAuditLogUncheckedCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundUncheckedCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryUncheckedCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryUncheckedCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedCreateNestedManyWithoutUserInput
 }
 
 export type UserCreateOrConnectWithoutSessionsInput = {
@@ -565,6 +682,11 @@ export type UserUpdateWithoutSessionsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   authTokens?: Prisma.AuthTokenUpdateManyWithoutUserNestedInput
   auditLogs?: Prisma.AuthAuditLogUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUpdateManyWithoutUserNestedInput
 }
 
 export type UserUncheckedUpdateWithoutSessionsInput = {
@@ -580,6 +702,11 @@ export type UserUncheckedUpdateWithoutSessionsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   authTokens?: Prisma.AuthTokenUncheckedUpdateManyWithoutUserNestedInput
   auditLogs?: Prisma.AuthAuditLogUncheckedUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUncheckedUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUncheckedUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUncheckedUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedUpdateManyWithoutUserNestedInput
 }
 
 export type UserCreateWithoutAuthTokensInput = {
@@ -595,6 +722,11 @@ export type UserCreateWithoutAuthTokensInput = {
   updatedAt?: Date | string
   sessions?: Prisma.UserSessionCreateNestedManyWithoutUserInput
   auditLogs?: Prisma.AuthAuditLogCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitCreateNestedManyWithoutUserInput
 }
 
 export type UserUncheckedCreateWithoutAuthTokensInput = {
@@ -610,6 +742,11 @@ export type UserUncheckedCreateWithoutAuthTokensInput = {
   updatedAt?: Date | string
   sessions?: Prisma.UserSessionUncheckedCreateNestedManyWithoutUserInput
   auditLogs?: Prisma.AuthAuditLogUncheckedCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundUncheckedCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryUncheckedCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryUncheckedCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedCreateNestedManyWithoutUserInput
 }
 
 export type UserCreateOrConnectWithoutAuthTokensInput = {
@@ -641,6 +778,11 @@ export type UserUpdateWithoutAuthTokensInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.UserSessionUpdateManyWithoutUserNestedInput
   auditLogs?: Prisma.AuthAuditLogUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUpdateManyWithoutUserNestedInput
 }
 
 export type UserUncheckedUpdateWithoutAuthTokensInput = {
@@ -656,6 +798,11 @@ export type UserUncheckedUpdateWithoutAuthTokensInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.UserSessionUncheckedUpdateManyWithoutUserNestedInput
   auditLogs?: Prisma.AuthAuditLogUncheckedUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUncheckedUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUncheckedUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUncheckedUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedUpdateManyWithoutUserNestedInput
 }
 
 export type UserCreateWithoutAuditLogsInput = {
@@ -671,6 +818,11 @@ export type UserCreateWithoutAuditLogsInput = {
   updatedAt?: Date | string
   sessions?: Prisma.UserSessionCreateNestedManyWithoutUserInput
   authTokens?: Prisma.AuthTokenCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitCreateNestedManyWithoutUserInput
 }
 
 export type UserUncheckedCreateWithoutAuditLogsInput = {
@@ -686,6 +838,11 @@ export type UserUncheckedCreateWithoutAuditLogsInput = {
   updatedAt?: Date | string
   sessions?: Prisma.UserSessionUncheckedCreateNestedManyWithoutUserInput
   authTokens?: Prisma.AuthTokenUncheckedCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundUncheckedCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryUncheckedCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryUncheckedCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedCreateNestedManyWithoutUserInput
 }
 
 export type UserCreateOrConnectWithoutAuditLogsInput = {
@@ -717,6 +874,11 @@ export type UserUpdateWithoutAuditLogsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.UserSessionUpdateManyWithoutUserNestedInput
   authTokens?: Prisma.AuthTokenUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUpdateManyWithoutUserNestedInput
 }
 
 export type UserUncheckedUpdateWithoutAuditLogsInput = {
@@ -732,6 +894,491 @@ export type UserUncheckedUpdateWithoutAuditLogsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.UserSessionUncheckedUpdateManyWithoutUserNestedInput
   authTokens?: Prisma.AuthTokenUncheckedUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUncheckedUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUncheckedUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUncheckedUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedUpdateManyWithoutUserNestedInput
+}
+
+export type UserCreateWithoutFundsInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitCreateNestedManyWithoutUserInput
+}
+
+export type UserUncheckedCreateWithoutFundsInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionUncheckedCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenUncheckedCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryUncheckedCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryUncheckedCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedCreateNestedManyWithoutUserInput
+}
+
+export type UserCreateOrConnectWithoutFundsInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutFundsInput, Prisma.UserUncheckedCreateWithoutFundsInput>
+}
+
+export type UserUpsertWithoutFundsInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutFundsInput, Prisma.UserUncheckedUpdateWithoutFundsInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutFundsInput, Prisma.UserUncheckedCreateWithoutFundsInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutFundsInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutFundsInput, Prisma.UserUncheckedUpdateWithoutFundsInput>
+}
+
+export type UserUpdateWithoutFundsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUpdateManyWithoutUserNestedInput
+}
+
+export type UserUncheckedUpdateWithoutFundsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUncheckedUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUncheckedUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUncheckedUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUncheckedUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedUpdateManyWithoutUserNestedInput
+}
+
+export type UserCreateWithoutCategoriesInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitCreateNestedManyWithoutUserInput
+}
+
+export type UserUncheckedCreateWithoutCategoriesInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionUncheckedCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenUncheckedCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundUncheckedCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryUncheckedCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedCreateNestedManyWithoutUserInput
+}
+
+export type UserCreateOrConnectWithoutCategoriesInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutCategoriesInput, Prisma.UserUncheckedCreateWithoutCategoriesInput>
+}
+
+export type UserUpsertWithoutCategoriesInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutCategoriesInput, Prisma.UserUncheckedUpdateWithoutCategoriesInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutCategoriesInput, Prisma.UserUncheckedCreateWithoutCategoriesInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutCategoriesInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutCategoriesInput, Prisma.UserUncheckedUpdateWithoutCategoriesInput>
+}
+
+export type UserUpdateWithoutCategoriesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUpdateManyWithoutUserNestedInput
+}
+
+export type UserUncheckedUpdateWithoutCategoriesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUncheckedUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUncheckedUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUncheckedUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUncheckedUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedUpdateManyWithoutUserNestedInput
+}
+
+export type UserCreateWithoutFinancialTransactionsInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitCreateNestedManyWithoutUserInput
+}
+
+export type UserUncheckedCreateWithoutFinancialTransactionsInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionUncheckedCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenUncheckedCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundUncheckedCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryUncheckedCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryUncheckedCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedCreateNestedManyWithoutUserInput
+}
+
+export type UserCreateOrConnectWithoutFinancialTransactionsInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutFinancialTransactionsInput, Prisma.UserUncheckedCreateWithoutFinancialTransactionsInput>
+}
+
+export type UserUpsertWithoutFinancialTransactionsInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutFinancialTransactionsInput, Prisma.UserUncheckedUpdateWithoutFinancialTransactionsInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutFinancialTransactionsInput, Prisma.UserUncheckedCreateWithoutFinancialTransactionsInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutFinancialTransactionsInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutFinancialTransactionsInput, Prisma.UserUncheckedUpdateWithoutFinancialTransactionsInput>
+}
+
+export type UserUpdateWithoutFinancialTransactionsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUpdateManyWithoutUserNestedInput
+}
+
+export type UserUncheckedUpdateWithoutFinancialTransactionsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUncheckedUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUncheckedUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUncheckedUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUncheckedUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUncheckedUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedUpdateManyWithoutUserNestedInput
+}
+
+export type UserCreateWithoutFundEntriesInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitCreateNestedManyWithoutUserInput
+}
+
+export type UserUncheckedCreateWithoutFundEntriesInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionUncheckedCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenUncheckedCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundUncheckedCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryUncheckedCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedCreateNestedManyWithoutUserInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedCreateNestedManyWithoutUserInput
+}
+
+export type UserCreateOrConnectWithoutFundEntriesInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutFundEntriesInput, Prisma.UserUncheckedCreateWithoutFundEntriesInput>
+}
+
+export type UserUpsertWithoutFundEntriesInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutFundEntriesInput, Prisma.UserUncheckedUpdateWithoutFundEntriesInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutFundEntriesInput, Prisma.UserUncheckedCreateWithoutFundEntriesInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutFundEntriesInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutFundEntriesInput, Prisma.UserUncheckedUpdateWithoutFundEntriesInput>
+}
+
+export type UserUpdateWithoutFundEntriesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUpdateManyWithoutUserNestedInput
+}
+
+export type UserUncheckedUpdateWithoutFundEntriesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUncheckedUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUncheckedUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUncheckedUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUncheckedUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedUpdateManyWithoutUserNestedInput
+  transactionSplits?: Prisma.TransactionSplitUncheckedUpdateManyWithoutUserNestedInput
+}
+
+export type UserCreateWithoutTransactionSplitsInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryCreateNestedManyWithoutUserInput
+}
+
+export type UserUncheckedCreateWithoutTransactionSplitsInput = {
+  id?: string
+  email: string
+  passwordHash: string
+  fullName: string
+  preferredCurrency?: string
+  timezone?: string
+  emailVerifiedAt?: Date | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  sessions?: Prisma.UserSessionUncheckedCreateNestedManyWithoutUserInput
+  authTokens?: Prisma.AuthTokenUncheckedCreateNestedManyWithoutUserInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedCreateNestedManyWithoutUserInput
+  funds?: Prisma.FundUncheckedCreateNestedManyWithoutUserInput
+  categories?: Prisma.CategoryUncheckedCreateNestedManyWithoutUserInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedCreateNestedManyWithoutUserInput
+  fundEntries?: Prisma.FundEntryUncheckedCreateNestedManyWithoutUserInput
+}
+
+export type UserCreateOrConnectWithoutTransactionSplitsInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutTransactionSplitsInput, Prisma.UserUncheckedCreateWithoutTransactionSplitsInput>
+}
+
+export type UserUpsertWithoutTransactionSplitsInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutTransactionSplitsInput, Prisma.UserUncheckedUpdateWithoutTransactionSplitsInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutTransactionSplitsInput, Prisma.UserUncheckedCreateWithoutTransactionSplitsInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutTransactionSplitsInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutTransactionSplitsInput, Prisma.UserUncheckedUpdateWithoutTransactionSplitsInput>
+}
+
+export type UserUpdateWithoutTransactionSplitsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUpdateManyWithoutUserNestedInput
+}
+
+export type UserUncheckedUpdateWithoutTransactionSplitsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  preferredCurrency?: Prisma.StringFieldUpdateOperationsInput | string
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
+  emailVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.UserSessionUncheckedUpdateManyWithoutUserNestedInput
+  authTokens?: Prisma.AuthTokenUncheckedUpdateManyWithoutUserNestedInput
+  auditLogs?: Prisma.AuthAuditLogUncheckedUpdateManyWithoutUserNestedInput
+  funds?: Prisma.FundUncheckedUpdateManyWithoutUserNestedInput
+  categories?: Prisma.CategoryUncheckedUpdateManyWithoutUserNestedInput
+  financialTransactions?: Prisma.FinancialTransactionUncheckedUpdateManyWithoutUserNestedInput
+  fundEntries?: Prisma.FundEntryUncheckedUpdateManyWithoutUserNestedInput
 }
 
 
@@ -743,12 +1390,22 @@ export type UserCountOutputType = {
   sessions: number
   authTokens: number
   auditLogs: number
+  funds: number
+  categories: number
+  financialTransactions: number
+  fundEntries: number
+  transactionSplits: number
 }
 
 export type UserCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   sessions?: boolean | UserCountOutputTypeCountSessionsArgs
   authTokens?: boolean | UserCountOutputTypeCountAuthTokensArgs
   auditLogs?: boolean | UserCountOutputTypeCountAuditLogsArgs
+  funds?: boolean | UserCountOutputTypeCountFundsArgs
+  categories?: boolean | UserCountOutputTypeCountCategoriesArgs
+  financialTransactions?: boolean | UserCountOutputTypeCountFinancialTransactionsArgs
+  fundEntries?: boolean | UserCountOutputTypeCountFundEntriesArgs
+  transactionSplits?: boolean | UserCountOutputTypeCountTransactionSplitsArgs
 }
 
 /**
@@ -782,6 +1439,41 @@ export type UserCountOutputTypeCountAuditLogsArgs<ExtArgs extends runtime.Types.
   where?: Prisma.AuthAuditLogWhereInput
 }
 
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountFundsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.FundWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountCategoriesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.CategoryWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountFinancialTransactionsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.FinancialTransactionWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountFundEntriesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.FundEntryWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountTransactionSplitsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.TransactionSplitWhereInput
+}
+
 
 export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
@@ -797,6 +1489,11 @@ export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   sessions?: boolean | Prisma.User$sessionsArgs<ExtArgs>
   authTokens?: boolean | Prisma.User$authTokensArgs<ExtArgs>
   auditLogs?: boolean | Prisma.User$auditLogsArgs<ExtArgs>
+  funds?: boolean | Prisma.User$fundsArgs<ExtArgs>
+  categories?: boolean | Prisma.User$categoriesArgs<ExtArgs>
+  financialTransactions?: boolean | Prisma.User$financialTransactionsArgs<ExtArgs>
+  fundEntries?: boolean | Prisma.User$fundEntriesArgs<ExtArgs>
+  transactionSplits?: boolean | Prisma.User$transactionSplitsArgs<ExtArgs>
   _count?: boolean | Prisma.UserCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["user"]>
 
@@ -844,6 +1541,11 @@ export type UserInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   sessions?: boolean | Prisma.User$sessionsArgs<ExtArgs>
   authTokens?: boolean | Prisma.User$authTokensArgs<ExtArgs>
   auditLogs?: boolean | Prisma.User$auditLogsArgs<ExtArgs>
+  funds?: boolean | Prisma.User$fundsArgs<ExtArgs>
+  categories?: boolean | Prisma.User$categoriesArgs<ExtArgs>
+  financialTransactions?: boolean | Prisma.User$financialTransactionsArgs<ExtArgs>
+  fundEntries?: boolean | Prisma.User$fundEntriesArgs<ExtArgs>
+  transactionSplits?: boolean | Prisma.User$transactionSplitsArgs<ExtArgs>
   _count?: boolean | Prisma.UserCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type UserIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {}
@@ -855,6 +1557,11 @@ export type $UserPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     sessions: Prisma.$UserSessionPayload<ExtArgs>[]
     authTokens: Prisma.$AuthTokenPayload<ExtArgs>[]
     auditLogs: Prisma.$AuthAuditLogPayload<ExtArgs>[]
+    funds: Prisma.$FundPayload<ExtArgs>[]
+    categories: Prisma.$CategoryPayload<ExtArgs>[]
+    financialTransactions: Prisma.$FinancialTransactionPayload<ExtArgs>[]
+    fundEntries: Prisma.$FundEntryPayload<ExtArgs>[]
+    transactionSplits: Prisma.$TransactionSplitPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -1264,6 +1971,11 @@ export interface Prisma__UserClient<T, Null = never, ExtArgs extends runtime.Typ
   sessions<T extends Prisma.User$sessionsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$sessionsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$UserSessionPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   authTokens<T extends Prisma.User$authTokensArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$authTokensArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$AuthTokenPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   auditLogs<T extends Prisma.User$auditLogsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$auditLogsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$AuthAuditLogPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  funds<T extends Prisma.User$fundsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$fundsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FundPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  categories<T extends Prisma.User$categoriesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$categoriesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$CategoryPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  financialTransactions<T extends Prisma.User$financialTransactionsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$financialTransactionsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FinancialTransactionPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  fundEntries<T extends Prisma.User$fundEntriesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$fundEntriesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FundEntryPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  transactionSplits<T extends Prisma.User$transactionSplitsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$transactionSplitsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TransactionSplitPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1765,6 +2477,126 @@ export type User$auditLogsArgs<ExtArgs extends runtime.Types.Extensions.Internal
   take?: number
   skip?: number
   distinct?: Prisma.AuthAuditLogScalarFieldEnum | Prisma.AuthAuditLogScalarFieldEnum[]
+}
+
+/**
+ * User.funds
+ */
+export type User$fundsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the Fund
+   */
+  select?: Prisma.FundSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the Fund
+   */
+  omit?: Prisma.FundOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.FundInclude<ExtArgs> | null
+  where?: Prisma.FundWhereInput
+  orderBy?: Prisma.FundOrderByWithRelationInput | Prisma.FundOrderByWithRelationInput[]
+  cursor?: Prisma.FundWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.FundScalarFieldEnum | Prisma.FundScalarFieldEnum[]
+}
+
+/**
+ * User.categories
+ */
+export type User$categoriesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the Category
+   */
+  select?: Prisma.CategorySelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the Category
+   */
+  omit?: Prisma.CategoryOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.CategoryInclude<ExtArgs> | null
+  where?: Prisma.CategoryWhereInput
+  orderBy?: Prisma.CategoryOrderByWithRelationInput | Prisma.CategoryOrderByWithRelationInput[]
+  cursor?: Prisma.CategoryWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.CategoryScalarFieldEnum | Prisma.CategoryScalarFieldEnum[]
+}
+
+/**
+ * User.financialTransactions
+ */
+export type User$financialTransactionsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the FinancialTransaction
+   */
+  select?: Prisma.FinancialTransactionSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the FinancialTransaction
+   */
+  omit?: Prisma.FinancialTransactionOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.FinancialTransactionInclude<ExtArgs> | null
+  where?: Prisma.FinancialTransactionWhereInput
+  orderBy?: Prisma.FinancialTransactionOrderByWithRelationInput | Prisma.FinancialTransactionOrderByWithRelationInput[]
+  cursor?: Prisma.FinancialTransactionWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.FinancialTransactionScalarFieldEnum | Prisma.FinancialTransactionScalarFieldEnum[]
+}
+
+/**
+ * User.fundEntries
+ */
+export type User$fundEntriesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the FundEntry
+   */
+  select?: Prisma.FundEntrySelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the FundEntry
+   */
+  omit?: Prisma.FundEntryOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.FundEntryInclude<ExtArgs> | null
+  where?: Prisma.FundEntryWhereInput
+  orderBy?: Prisma.FundEntryOrderByWithRelationInput | Prisma.FundEntryOrderByWithRelationInput[]
+  cursor?: Prisma.FundEntryWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.FundEntryScalarFieldEnum | Prisma.FundEntryScalarFieldEnum[]
+}
+
+/**
+ * User.transactionSplits
+ */
+export type User$transactionSplitsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the TransactionSplit
+   */
+  select?: Prisma.TransactionSplitSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the TransactionSplit
+   */
+  omit?: Prisma.TransactionSplitOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TransactionSplitInclude<ExtArgs> | null
+  where?: Prisma.TransactionSplitWhereInput
+  orderBy?: Prisma.TransactionSplitOrderByWithRelationInput | Prisma.TransactionSplitOrderByWithRelationInput[]
+  cursor?: Prisma.TransactionSplitWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.TransactionSplitScalarFieldEnum | Prisma.TransactionSplitScalarFieldEnum[]
 }
 
 /**

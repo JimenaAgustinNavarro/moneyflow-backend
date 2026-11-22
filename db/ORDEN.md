@@ -18,6 +18,7 @@ Control estricto y auditable de scripts SQL versionados ejecutados sobre `moneyf
 |---|---|---|---|---|---|---|
 | `0001` | `0001_init_extensions.sql` | `MF-002` | `2026-11-21` | Ninguna (inicial) | `AD264B6AD0AD14D8A1BEFCF99379BF9FCD6D75FC9BD376873D5402AC861F0EC3` | Aplicada |
 | `0002` | `0002_auth_identity.sql` | `MF-005` | `2026-11-21` | `0001` | `C189582A612BD6FDDD190508FB6681D0E7E0F0F3C039B3047EEF3007F7982082` | Aplicada |
+| `0003` | `0003_financial_core.sql` | `MF-011` | `2026-11-22` | `0002` | `079D04D90F4AFF857F7D76F31DDDDEF164B630933D23C7990F30CB3FB992EF2E` | Aplicada |
 
 ---
 
@@ -59,4 +60,35 @@ Control estricto y auditable de scripts SQL versionados ejecutados sobre `moneyf
   DROP TABLE IF EXISTS public.users;
   DROP TYPE IF EXISTS public.auth_audit_event;
   DROP TYPE IF EXISTS public.auth_token_type;
+  ```
+
+### `0003_financial_core.sql`
+- **Motivo:** Crear los tipos enum (`currency_code`, `fund_type`, `category_kind`, `transaction_type`, `transaction_status`), la función/triggers `set_updated_at_timestamp()`, y las 5 tablas del Núcleo Financiero (`funds`, `categories`, `financial_transactions`, `fund_entries`, `transaction_splits`) con aislamiento compuesto `(id, user_id)` / `(id, user_id, currency)`, índice único parcial anti doble-`VOID`, índice de idempotencia parcial y sin columna mutable de saldo en `funds`.
+- **Dependencias:** `0002_auth_identity.sql` aplicada (`public.users` y `public.user_sessions` existentes).
+- **Comando de ejecución:**
+  ```powershell
+  Get-Content db/migrations/0003_financial_core.sql -Raw | docker exec -i moneyflow-postgres psql -U postgres -d moneyflow_dev -v ON_ERROR_STOP=1
+  ```
+- **Validación:**
+  ```powershell
+  docker exec -i moneyflow-postgres psql -U postgres -d moneyflow_dev -c "\dt public.*" -c "\dT+ public.*" -c "\d public.funds" -c "\d public.categories" -c "\d public.financial_transactions" -c "\d public.fund_entries" -c "\d public.transaction_splits"
+  ```
+- **Rollback:**
+  ```sql
+  DROP TRIGGER IF EXISTS trg_financial_transactions_set_updated_at ON public.financial_transactions;
+  DROP TRIGGER IF EXISTS trg_categories_set_updated_at ON public.categories;
+  DROP TRIGGER IF EXISTS trg_funds_set_updated_at ON public.funds;
+  DROP TRIGGER IF EXISTS trg_user_sessions_set_updated_at ON public.user_sessions;
+  DROP TRIGGER IF EXISTS trg_users_set_updated_at ON public.users;
+  DROP FUNCTION IF EXISTS public.set_updated_at_timestamp();
+  DROP TABLE IF EXISTS public.transaction_splits;
+  DROP TABLE IF EXISTS public.fund_entries;
+  DROP TABLE IF EXISTS public.financial_transactions;
+  DROP TABLE IF EXISTS public.categories;
+  DROP TABLE IF EXISTS public.funds;
+  DROP TYPE IF EXISTS public.transaction_status;
+  DROP TYPE IF EXISTS public.transaction_type;
+  DROP TYPE IF EXISTS public.category_kind;
+  DROP TYPE IF EXISTS public.fund_type;
+  DROP TYPE IF EXISTS public.currency_code;
   ```

@@ -41,9 +41,14 @@ model User {
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  sessions          UserSession[]
-  authTokens        AuthToken[]
-  auditLogs         AuthAuditLog[]
+  sessions              UserSession[]
+  authTokens            AuthToken[]
+  auditLogs             AuthAuditLog[]
+  funds                 Fund[]
+  categories            Category[]
+  financialTransactions FinancialTransaction[]
+  fundEntries           FundEntry[]
+  transactionSplits     TransactionSplit[]
 
   @@map("users")
 }
@@ -102,4 +107,194 @@ model AuthAuditLog {
   @@index([userId, createdAt(sort: Desc)], map: "auth_audit_logs_user_id_created_at_idx")
   @@index([event, createdAt(sort: Desc)], map: "auth_audit_logs_event_created_at_idx")
   @@map("auth_audit_logs")
+}
+
+// ============================================================================
+// Núcleo Financiero (MF-011)
+// Fuente de verdad de CHECK constraints, índices parciales (WHERE ...) y
+// FKs compuestas de aislamiento (user_id + currency): db/migrations/0003_financial_core.sql
+// ============================================================================
+
+enum CurrencyCode {
+  PEN
+  USD
+
+  @@map("currency_code")
+}
+
+enum FundType {
+  CASH
+  BANK
+  WALLET
+  SAVINGS
+  OTHER
+
+  @@map("fund_type")
+}
+
+enum CategoryKind {
+  INCOME
+  EXPENSE
+
+  @@map("category_kind")
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+  ADJUSTMENT
+  VOID
+  REFUND
+
+  @@map("transaction_type")
+}
+
+enum TransactionStatus {
+  POSTED
+  VOIDED
+
+  @@map("transaction_status")
+}
+
+/// Fondo virtual del usuario. Prohibido almacenar balance mutable; el saldo se deriva de SUM(fund_entries.signed_amount).
+/// SQL adicional en 0003_financial_core.sql:
+/// - CHECK (LENGTH(BTRIM(name)) > 0)
+/// - UNIQUE parcial: (user_id, LOWER(BTRIM(name))) WHERE is_archived = FALSE
+/// - UNIQUE (id, user_id) y UNIQUE (id, user_id, currency) para FKs compuestas en fund_entries
+model Fund {
+  id                   String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String       @map("user_id") @db.Uuid
+  name                 String       @db.VarChar(100)
+  type                 FundType
+  currency             CurrencyCode @default(PEN)
+  color                String?      @db.VarChar(20)
+  icon                 String?      @db.VarChar(50)
+  allowNegativeBalance Boolean      @default(false) @map("allow_negative_balance")
+  isArchived           Boolean      @default(false) @map("is_archived")
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user                 User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  fundEntries          FundEntry[]
+
+  @@unique([id, userId], map: "funds_id_user_id_key")
+  @@unique([id, userId, currency], map: "funds_id_user_id_currency_key")
+  @@index([userId, isArchived], map: "funds_user_id_is_archived_idx")
+  @@map("funds")
+}
+
+/// Categoría de ingreso o egreso (global de sistema cuando isSystem = true y userId = null, o propia del usuario).
+/// SQL adicional en 0003_financial_core.sql:
+/// - CHECK (LENGTH(BTRIM(name)) > 0)
+/// - CHECK ((is_system = TRUE AND user_id IS NULL) OR (is_system = FALSE AND user_id IS NOT NULL))
+/// - UNIQUE parcial sistema: (kind, LOWER(BTRIM(name))) WHERE is_system = TRUE AND is_archived = FALSE
+/// - UNIQUE parcial usuario: (user_id, kind, LOWER(BTRIM(name))) WHERE is_system = FALSE AND is_archived = FALSE
+model Category {
+  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String?                @map("user_id") @db.Uuid
+  name                  String                 @db.VarChar(100)
+  kind                  CategoryKind
+  color                 String?                @db.VarChar(20)
+  icon                  String?                @db.VarChar(50)
+  isSystem              Boolean                @default(false) @map("is_system")
+  isArchived            Boolean                @default(false) @map("is_archived")
+  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user                  User?                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  financialTransactions FinancialTransaction[]
+  transactionSplits     TransactionSplit[]
+
+  @@index([userId, kind, isArchived], map: "categories_user_id_kind_is_archived_idx")
+  @@map("categories")
+}
+
+/// Cabecera de transacción financiera. occurredOn es DATE calendario en America/Lima; recordedAt es TIMESTAMPTZ técnico.
+/// SQL adicional en 0003_financial_core.sql:
+/// - CHECK (amount > 0), CHECK (LENGTH(BTRIM(description)) > 0)
+/// - CHECK (idempotency_key IS NULL OR LENGTH(BTRIM(idempotency_key)) > 0)
+/// - CHECK (related_transaction_id IS NULL OR related_transaction_id <> id)
+/// - CHECK ((type IN ('VOID', 'REFUND') AND related_transaction_id IS NOT NULL) OR (type NOT IN ('VOID', 'REFUND') AND related_transaction_id IS NULL))
+/// - UNIQUE parcial idempotencia: (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+/// - UNIQUE parcial anti doble-VOID: (related_transaction_id) WHERE type = 'VOID' AND related_transaction_id IS NOT NULL
+/// - FK compuesta (related_transaction_id, user_id) -> financial_transactions(id, user_id) ON DELETE RESTRICT
+model FinancialTransaction {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String                 @map("user_id") @db.Uuid
+  type                 TransactionType
+  status               TransactionStatus      @default(POSTED)
+  amount               Decimal                @db.Decimal(14, 2)
+  currency             CurrencyCode
+  occurredOn           DateTime               @map("occurred_on") @db.Date
+  recordedAt           DateTime               @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  description          String                 @db.VarChar(200)
+  notes                String?                @db.VarChar(500)
+  categoryId           String?                @map("category_id") @db.Uuid
+  relatedTransactionId String?                @map("related_transaction_id") @db.Uuid
+  idempotencyKey       String?                @map("idempotency_key") @db.VarChar(128)
+  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user                 User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category             Category?              @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  relatedTransaction   FinancialTransaction?  @relation("TransactionRelation", fields: [relatedTransactionId], references: [id], onDelete: Restrict)
+  childTransactions    FinancialTransaction[] @relation("TransactionRelation")
+  fundEntries          FundEntry[]
+  transactionSplits    TransactionSplit[]
+
+  @@unique([id, userId], map: "financial_transactions_id_user_id_key")
+  @@unique([id, userId, currency], map: "financial_transactions_id_user_id_currency_key")
+  @@index([userId, occurredOn(sort: Desc), createdAt(sort: Desc)], map: "financial_transactions_user_id_occurred_on_created_at_idx")
+  @@index([userId, type, status], map: "financial_transactions_user_id_type_status_idx")
+  @@index([categoryId], map: "financial_transactions_category_id_idx")
+  @@index([relatedTransactionId], map: "financial_transactions_related_transaction_id_idx")
+  @@map("financial_transactions")
+}
+
+/// Asiento inmutable en el ledger por fondo.
+/// SQL adicional en 0003_financial_core.sql:
+/// - CHECK (signed_amount <> 0)
+/// - FK compuesta (transaction_id, user_id, currency) -> financial_transactions(id, user_id, currency) ON DELETE RESTRICT
+/// - FK compuesta (fund_id, user_id, currency) -> funds(id, user_id, currency) ON DELETE RESTRICT
+model FundEntry {
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String               @map("user_id") @db.Uuid
+  transactionId String               @map("transaction_id") @db.Uuid
+  fundId        String               @map("fund_id") @db.Uuid
+  signedAmount  Decimal              @map("signed_amount") @db.Decimal(14, 2)
+  currency      CurrencyCode
+  occurredOn    DateTime             @map("occurred_on") @db.Date
+  createdAt     DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  transaction   FinancialTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  fund          Fund                 @relation(fields: [fundId], references: [id], onDelete: Restrict)
+
+  @@index([userId, fundId], map: "fund_entries_user_id_fund_id_idx")
+  @@index([userId, occurredOn(sort: Desc), createdAt(sort: Desc)], map: "fund_entries_user_id_occurred_on_created_at_idx")
+  @@index([transactionId], map: "fund_entries_transaction_id_idx")
+  @@map("fund_entries")
+}
+
+/// Desglose de una transacción en múltiples categorías.
+/// SQL adicional en 0003_financial_core.sql:
+/// - CHECK (amount > 0)
+/// - FK compuesta (transaction_id, user_id) -> financial_transactions(id, user_id) ON DELETE RESTRICT
+model TransactionSplit {
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String               @map("user_id") @db.Uuid
+  transactionId String               @map("transaction_id") @db.Uuid
+  categoryId    String               @map("category_id") @db.Uuid
+  amount        Decimal              @db.Decimal(14, 2)
+  note          String?              @db.VarChar(200)
+  createdAt     DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  transaction   FinancialTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  category      Category             @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId], map: "transaction_splits_transaction_id_idx")
+  @@index([userId, categoryId], map: "transaction_splits_user_id_category_id_idx")
+  @@map("transaction_splits")
 }

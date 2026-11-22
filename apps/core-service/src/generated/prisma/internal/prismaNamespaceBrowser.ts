@@ -54,7 +54,12 @@ export const ModelName = {
   User: 'User',
   UserSession: 'UserSession',
   AuthToken: 'AuthToken',
-  AuthAuditLog: 'AuthAuditLog'
+  AuthAuditLog: 'AuthAuditLog',
+  Fund: 'Fund',
+  Category: 'Category',
+  FinancialTransaction: 'FinancialTransaction',
+  FundEntry: 'FundEntry',
+  TransactionSplit: 'TransactionSplit'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -131,6 +136,87 @@ export const AuthAuditLogScalarFieldEnum = {
 } as const
 
 export type AuthAuditLogScalarFieldEnum = (typeof AuthAuditLogScalarFieldEnum)[keyof typeof AuthAuditLogScalarFieldEnum]
+
+
+export const FundScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  name: 'name',
+  type: 'type',
+  currency: 'currency',
+  color: 'color',
+  icon: 'icon',
+  allowNegativeBalance: 'allowNegativeBalance',
+  isArchived: 'isArchived',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FundScalarFieldEnum = (typeof FundScalarFieldEnum)[keyof typeof FundScalarFieldEnum]
+
+
+export const CategoryScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  name: 'name',
+  kind: 'kind',
+  color: 'color',
+  icon: 'icon',
+  isSystem: 'isSystem',
+  isArchived: 'isArchived',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type CategoryScalarFieldEnum = (typeof CategoryScalarFieldEnum)[keyof typeof CategoryScalarFieldEnum]
+
+
+export const FinancialTransactionScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  type: 'type',
+  status: 'status',
+  amount: 'amount',
+  currency: 'currency',
+  occurredOn: 'occurredOn',
+  recordedAt: 'recordedAt',
+  description: 'description',
+  notes: 'notes',
+  categoryId: 'categoryId',
+  relatedTransactionId: 'relatedTransactionId',
+  idempotencyKey: 'idempotencyKey',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FinancialTransactionScalarFieldEnum = (typeof FinancialTransactionScalarFieldEnum)[keyof typeof FinancialTransactionScalarFieldEnum]
+
+
+export const FundEntryScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  transactionId: 'transactionId',
+  fundId: 'fundId',
+  signedAmount: 'signedAmount',
+  currency: 'currency',
+  occurredOn: 'occurredOn',
+  createdAt: 'createdAt'
+} as const
+
+export type FundEntryScalarFieldEnum = (typeof FundEntryScalarFieldEnum)[keyof typeof FundEntryScalarFieldEnum]
+
+
+export const TransactionSplitScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  transactionId: 'transactionId',
+  categoryId: 'categoryId',
+  amount: 'amount',
+  note: 'note',
+  createdAt: 'createdAt'
+} as const
+
+export type TransactionSplitScalarFieldEnum = (typeof TransactionSplitScalarFieldEnum)[keyof typeof TransactionSplitScalarFieldEnum]
 
 
 export const SortOrder = {

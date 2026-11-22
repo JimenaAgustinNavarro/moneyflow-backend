@@ -30,3 +30,50 @@ export const AuthAuditEvent = {
 } as const
 
 export type AuthAuditEvent = (typeof AuthAuditEvent)[keyof typeof AuthAuditEvent]
+
+
+export const CurrencyCode = {
+  PEN: 'PEN',
+  USD: 'USD'
+} as const
+
+export type CurrencyCode = (typeof CurrencyCode)[keyof typeof CurrencyCode]
+
+
+export const FundType = {
+  CASH: 'CASH',
+  BANK: 'BANK',
+  WALLET: 'WALLET',
+  SAVINGS: 'SAVINGS',
+  OTHER: 'OTHER'
+} as const
+
+export type FundType = (typeof FundType)[keyof typeof FundType]
+
+
+export const CategoryKind = {
+  INCOME: 'INCOME',
+  EXPENSE: 'EXPENSE'
+} as const
+
+export type CategoryKind = (typeof CategoryKind)[keyof typeof CategoryKind]
+
+
+export const TransactionType = {
+  INCOME: 'INCOME',
+  EXPENSE: 'EXPENSE',
+  TRANSFER: 'TRANSFER',
+  ADJUSTMENT: 'ADJUSTMENT',
+  VOID: 'VOID',
+  REFUND: 'REFUND'
+} as const
+
+export type TransactionType = (typeof TransactionType)[keyof typeof TransactionType]
+
+
+export const TransactionStatus = {
+  POSTED: 'POSTED',
+  VOIDED: 'VOIDED'
+} as const
+
+export type TransactionStatus = (typeof TransactionStatus)[keyof typeof TransactionStatus]
