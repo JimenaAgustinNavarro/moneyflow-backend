@@ -6,6 +6,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { InternalContextGuard } from './common/guards/internal-context.guard';
 import { FundsModule } from './funds/funds.module';
 import { HealthModule } from './health/health.module';
+import { LedgerModule } from './ledger/ledger.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -18,6 +19,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     CategoriesModule,
     FundsModule,
+    LedgerModule,
   ],
   providers: [
     {
