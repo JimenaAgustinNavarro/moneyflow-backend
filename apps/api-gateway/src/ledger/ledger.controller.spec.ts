@@ -365,4 +365,174 @@ describe('LedgerController (HTTP boundary)', () => {
       { requestId: 'req-ledger-1', userId },
     );
   });
+
+  it('validates POST /api/v1/transactions/transfers (same fund, invalid date/amount/notes/key) and forwards valid transfer', async () => {
+    const accessToken = await authJwtService.signAccessToken(userId, sessionId);
+    const destFundId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    coreTcpClientMock.send.mockResolvedValue({
+      transaction: { id: txId, type: 'TRANSFER' },
+      sourceFundBalanceAfter: '350.00',
+      destinationFundBalanceAfter: '350.00',
+    });
+
+    const invalidBodies: Array<Record<string, unknown>> = [
+      {
+        sourceFundId: fundId,
+        destinationFundId: fundId.toUpperCase(),
+        amount: '100.00',
+        description: 'Mismo fondo',
+      },
+      {
+        sourceFundId: fundId,
+        destinationFundId: destFundId,
+        amount: '0.00',
+        description: 'Monto cero',
+      },
+      {
+        sourceFundId: fundId,
+        destinationFundId: destFundId,
+        amount: '100.00',
+        occurredOn: '2026-02-31',
+        description: 'Fecha inválida',
+      },
+      {
+        sourceFundId: fundId,
+        destinationFundId: destFundId,
+        amount: '100.00',
+        description: 'User inyectado',
+        userId: '99999999-9999-4999-8999-999999999999',
+      },
+      {
+        sourceFundId: fundId,
+        destinationFundId: destFundId,
+        amount: '100.00',
+        description: 'Notas no string',
+        notes: 99,
+      },
+    ];
+
+    for (const body of invalidBodies) {
+      await request(app.getHttpServer())
+        .post('/api/v1/transactions/transfers')
+        .set('Origin', 'http://localhost:3001')
+        .set('Cookie', [`mf_access_token=${accessToken}`])
+        .send(body)
+        .expect(400);
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/v1/transactions/transfers')
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .set('Idempotency-Key', '   ')
+      .send({
+        sourceFundId: fundId,
+        destinationFundId: destFundId,
+        amount: '150.00',
+        description: 'Traspaso',
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/transactions/transfers')
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .set('Idempotency-Key', '  transfer-key-1  ')
+      .send({
+        sourceFundId: fundId,
+        destinationFundId: destFundId,
+        amount: '150.00',
+        occurredOn: '2026-11-22',
+        description: '  Traspaso a ahorros  ',
+        notes: '   ',
+      })
+      .expect(201);
+
+    expect(coreTcpClientMock.send).toHaveBeenCalledWith(
+      LEDGER_PATTERNS.RECORD_TRANSFER,
+      {
+        sourceFundId: fundId,
+        destinationFundId: destFundId,
+        amount: '150.00',
+        occurredOn: '2026-11-22',
+        description: 'Traspaso a ahorros',
+        notes: null,
+        idempotencyKey: 'transfer-key-1',
+      },
+      { requestId: 'req-ledger-1', userId },
+    );
+  });
+
+  it('validates POST /api/v1/transactions/adjustments and forwards valid INCREASE/DECREASE adjustment', async () => {
+    const accessToken = await authJwtService.signAccessToken(userId, sessionId);
+    coreTcpClientMock.send.mockResolvedValue({
+      transaction: { id: txId, type: 'ADJUSTMENT' },
+      fundBalanceAfter: '145.25',
+    });
+
+    const invalidBodies: Array<Record<string, unknown>> = [
+      {
+        fundId,
+        direction: 'INVALID',
+        amount: '45.25',
+        description: 'Dirección inválida',
+      },
+      {
+        fundId,
+        direction: 'DECREASE',
+        amount: '-10.00',
+        description: 'Monto negativo',
+      },
+      {
+        fundId,
+        direction: 'INCREASE',
+        amount: '45.25',
+        occurredOn: '2026-02-31',
+        description: 'Fecha inválida',
+      },
+      {
+        fundId,
+        direction: 'INCREASE',
+        amount: '45.25',
+        description: 'Campo extra',
+        userId: '99999999-9999-4999-8999-999999999999',
+      },
+    ];
+
+    for (const body of invalidBodies) {
+      await request(app.getHttpServer())
+        .post('/api/v1/transactions/adjustments')
+        .set('Origin', 'http://localhost:3001')
+        .set('Cookie', [`mf_access_token=${accessToken}`])
+        .send(body)
+        .expect(400);
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/v1/transactions/adjustments')
+      .set('Origin', 'http://localhost:3001')
+      .set('Cookie', [`mf_access_token=${accessToken}`])
+      .set('Idempotency-Key', 'adj-key-1')
+      .send({
+        fundId,
+        direction: 'INCREASE',
+        amount: '45.25',
+        description: '  Arqueo de caja  ',
+        notes: '  Sobrante  ',
+      })
+      .expect(201);
+
+    expect(coreTcpClientMock.send).toHaveBeenCalledWith(
+      LEDGER_PATTERNS.RECORD_ADJUSTMENT,
+      {
+        fundId,
+        direction: 'INCREASE',
+        amount: '45.25',
+        description: 'Arqueo de caja',
+        notes: 'Sobrante',
+        idempotencyKey: 'adj-key-1',
+      },
+      { requestId: 'req-ledger-1', userId },
+    );
+  });
 });

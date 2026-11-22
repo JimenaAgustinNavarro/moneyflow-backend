@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import {
   addMoney,
+  AdjustmentDirection,
   formatMoney,
   FundCurrencyCode,
   FundEntryView,
@@ -12,8 +13,12 @@ import {
   isValidGregorianDate,
   parseMoney,
   RecordableTransactionType,
+  RecordAdjustmentResponse,
+  RecordAdjustmentTcpPayload,
   RecordTransactionResponse,
   RecordTransactionTcpPayload,
+  RecordTransferResponse,
+  RecordTransferTcpPayload,
   subMoney,
   TransactionDetailView,
   TransactionSplitInput,
@@ -21,6 +26,7 @@ import {
   TransactionStatusValue,
   TransactionTypeValue,
 } from '@app/shared';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const MAX_DECIMAL_14_2 = '999999999999.99';
@@ -86,6 +92,26 @@ interface NormalizedRecordRequest {
   notes: string | null;
   categoryId: string | null;
   splits: NormalizedSplit[];
+  idempotencyKey: string | null;
+}
+
+interface NormalizedTransferRequest {
+  sourceFundId: string;
+  destinationFundId: string;
+  amount: string;
+  occurredOn: string;
+  description: string;
+  notes: string | null;
+  idempotencyKey: string | null;
+}
+
+interface NormalizedAdjustmentRequest {
+  fundId: string;
+  direction: AdjustmentDirection;
+  amount: string;
+  occurredOn: string;
+  description: string;
+  notes: string | null;
   idempotencyKey: string | null;
 }
 
@@ -364,6 +390,103 @@ function isIdempotentRequestEquivalent(
   return true;
 }
 
+function normalizeCommonTxFields(payload: {
+  amount: string;
+  occurredOn?: string;
+  description: string;
+  notes?: string | null;
+  idempotencyKey?: string;
+}): {
+  amount: string;
+  occurredOn: string;
+  description: string;
+  notes: string | null;
+  idempotencyKey: string | null;
+} {
+  const formattedAmount = validateAndFormatPositiveAmount(payload.amount, 'amount');
+
+  let occurredOn = getLimaToday();
+  if (payload.occurredOn !== undefined) {
+    if (typeof payload.occurredOn !== 'string' || !isValidGregorianDate(payload.occurredOn)) {
+      throw buildBadRequestRpc(
+        'occurredOn must be a valid Gregorian calendar date in YYYY-MM-DD format',
+      );
+    }
+    occurredOn = payload.occurredOn;
+  }
+
+  const trimmedDescription =
+    typeof payload.description === 'string' ? payload.description.trim() : '';
+  if (trimmedDescription.length === 0 || trimmedDescription.length > MAX_DESCRIPTION_LENGTH) {
+    throw buildBadRequestRpc('Invalid description');
+  }
+
+  const normalizedNotes = normalizeOptionalNote(payload.notes, MAX_NOTES_LENGTH, 'notes');
+
+  let normalizedIdempotencyKey: string | null = null;
+  if (payload.idempotencyKey !== undefined) {
+    if (typeof payload.idempotencyKey !== 'string') {
+      throw buildBadRequestRpc('Idempotency-Key must be a string');
+    }
+    const trimmedKey = payload.idempotencyKey.trim();
+    if (trimmedKey.length === 0 || trimmedKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      throw buildBadRequestRpc('Idempotency-Key must be between 1 and 128 characters');
+    }
+    normalizedIdempotencyKey = trimmedKey;
+  }
+
+  return {
+    amount: formattedAmount,
+    occurredOn,
+    description: trimmedDescription,
+    notes: normalizedNotes,
+    idempotencyKey: normalizedIdempotencyKey,
+  };
+}
+
+function normalizeTransferPayload(payload: RecordTransferTcpPayload): NormalizedTransferRequest {
+  const sourceFundId =
+    typeof payload.sourceFundId === 'string' ? payload.sourceFundId.trim().toLowerCase() : '';
+  const destinationFundId =
+    typeof payload.destinationFundId === 'string'
+      ? payload.destinationFundId.trim().toLowerCase()
+      : '';
+
+  if (sourceFundId.length === 0 || destinationFundId.length === 0) {
+    throw buildBadRequestRpc('sourceFundId and destinationFundId are required');
+  }
+
+  if (sourceFundId === destinationFundId) {
+    throw buildBadRequestRpc('sourceFundId and destinationFundId must be different');
+  }
+
+  const common = normalizeCommonTxFields(payload);
+  return {
+    sourceFundId,
+    destinationFundId,
+    ...common,
+  };
+}
+
+function normalizeAdjustmentPayload(
+  payload: RecordAdjustmentTcpPayload,
+): NormalizedAdjustmentRequest {
+  if (typeof payload.fundId !== 'string' || payload.fundId.trim().length === 0) {
+    throw buildBadRequestRpc('fundId is required');
+  }
+
+  if (payload.direction !== 'INCREASE' && payload.direction !== 'DECREASE') {
+    throw buildBadRequestRpc('direction must be INCREASE or DECREASE');
+  }
+
+  const common = normalizeCommonTxFields(payload);
+  return {
+    fundId: payload.fundId.trim().toLowerCase(),
+    direction: payload.direction,
+    ...common,
+  };
+}
+
 function toFundEntryView(entry: FundEntryDbProjection): FundEntryView {
   return {
     id: entry.id,
@@ -385,7 +508,110 @@ function toTransactionSplitView(split: TransactionSplitDbProjection): Transactio
   };
 }
 
+function isIdempotentTransferEquivalent(
+  existing: TransactionDbProjection,
+  normalized: NormalizedTransferRequest,
+): boolean {
+  if (existing.type !== 'TRANSFER') {
+    return false;
+  }
+
+  if (formatMoney(existing.amount.toString()) !== normalized.amount) {
+    return false;
+  }
+
+  if (formatDbCalendarDate(existing.occurredOn) !== normalized.occurredOn) {
+    return false;
+  }
+
+  if (existing.description !== normalized.description) {
+    return false;
+  }
+
+  if ((existing.notes ?? null) !== normalized.notes) {
+    return false;
+  }
+
+  if ((existing.categoryId ?? null) !== null || existing.transactionSplits.length !== 0) {
+    return false;
+  }
+
+  if (existing.fundEntries.length !== 2) {
+    return false;
+  }
+
+  const expectedNegativeAmount = formatMoney(parseMoney(normalized.amount).negated());
+  const hasSourceEntry = existing.fundEntries.some(
+    (entry) =>
+      entry.fundId.toLowerCase() === normalized.sourceFundId &&
+      formatMoney(entry.signedAmount.toString()) === expectedNegativeAmount,
+  );
+  const hasDestinationEntry = existing.fundEntries.some(
+    (entry) =>
+      entry.fundId.toLowerCase() === normalized.destinationFundId &&
+      formatMoney(entry.signedAmount.toString()) === normalized.amount,
+  );
+
+  return hasSourceEntry && hasDestinationEntry;
+}
+
+function isIdempotentAdjustmentEquivalent(
+  existing: TransactionDbProjection,
+  normalized: NormalizedAdjustmentRequest,
+): boolean {
+  if (existing.type !== 'ADJUSTMENT') {
+    return false;
+  }
+
+  if (formatMoney(existing.amount.toString()) !== normalized.amount) {
+    return false;
+  }
+
+  if (formatDbCalendarDate(existing.occurredOn) !== normalized.occurredOn) {
+    return false;
+  }
+
+  if (existing.description !== normalized.description) {
+    return false;
+  }
+
+  if ((existing.notes ?? null) !== normalized.notes) {
+    return false;
+  }
+
+  if ((existing.categoryId ?? null) !== null || existing.transactionSplits.length !== 0) {
+    return false;
+  }
+
+  if (existing.fundEntries.length !== 1) {
+    return false;
+  }
+
+  const expectedSignedAmount =
+    normalized.direction === 'INCREASE'
+      ? normalized.amount
+      : formatMoney(parseMoney(normalized.amount).negated());
+
+  return (
+    existing.fundEntries[0].fundId.toLowerCase() === normalized.fundId &&
+    formatMoney(existing.fundEntries[0].signedAmount.toString()) === expectedSignedAmount
+  );
+}
+
 function toTransactionDetailView(txRecord: TransactionDbProjection): TransactionDetailView {
+  const mappedEntries = txRecord.fundEntries.map(toFundEntryView);
+  const entries =
+    txRecord.type === 'TRANSFER'
+      ? [...mappedEntries].sort((left, right) => {
+          const leftNegative = parseMoney(left.signedAmount).isNegative();
+          const rightNegative = parseMoney(right.signedAmount).isNegative();
+          if (leftNegative === rightNegative) {
+            return 0;
+          }
+          return leftNegative ? -1 : 1;
+        })
+      : mappedEntries;
+
   return {
     id: txRecord.id,
     type: txRecord.type,
@@ -401,7 +627,7 @@ function toTransactionDetailView(txRecord: TransactionDbProjection): Transaction
     idempotencyKey: txRecord.idempotencyKey ?? null,
     createdAt: txRecord.createdAt.toISOString(),
     updatedAt: txRecord.updatedAt.toISOString(),
-    entries: txRecord.fundEntries.map(toFundEntryView),
+    entries,
     splits: txRecord.transactionSplits.map(toTransactionSplitView),
   };
 }
@@ -409,6 +635,39 @@ function toTransactionDetailView(txRecord: TransactionDbProjection): Transaction
 @Injectable()
 export class LedgerService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async getFundBalance(
+    db: PrismaService | Prisma.TransactionClient,
+    userId: string,
+    fundId: string,
+  ): Promise<string> {
+    const agg = await db.fundEntry.aggregate({
+      where: {
+        userId,
+        fundId,
+      },
+      _sum: { signedAmount: true },
+    });
+
+    return formatMoney(agg._sum.signedAmount?.toString() ?? '0.00');
+  }
+
+  private async findByIdempotencyKey(
+    db: PrismaService | Prisma.TransactionClient,
+    userId: string,
+    idempotencyKey: string,
+  ): Promise<TransactionDbProjection | null> {
+    return db.financialTransaction.findFirst({
+      where: {
+        userId,
+        idempotencyKey,
+      },
+      include: {
+        fundEntries: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+        transactionSplits: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+      },
+    });
+  }
 
   async recordTransaction(
     context: InternalAuthContext,
@@ -643,5 +902,311 @@ export class LedgerService {
     return {
       transaction: toTransactionDetailView(txRecord),
     };
+  }
+
+  async recordTransfer(
+    context: InternalAuthContext,
+    payload: RecordTransferTcpPayload,
+  ): Promise<RecordTransferResponse> {
+    const userId = requireAuthenticatedUserId(context);
+    const normalized = normalizeTransferPayload(payload);
+    const occurredOnDate = toLimaCalendarDateUtc(normalized.occurredOn);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        if (normalized.idempotencyKey !== null) {
+          const existing = await this.findByIdempotencyKey(tx, userId, normalized.idempotencyKey);
+          if (existing) {
+            if (!isIdempotentTransferEquivalent(existing, normalized)) {
+              throw buildConflictRpc(
+                'Idempotency key already used with different request parameters',
+              );
+            }
+
+            const [sourceFundBalanceAfter, destinationFundBalanceAfter] = await Promise.all([
+              this.getFundBalance(tx, userId, normalized.sourceFundId),
+              this.getFundBalance(tx, userId, normalized.destinationFundId),
+            ]);
+
+            return {
+              transaction: toTransactionDetailView(existing),
+              sourceFundBalanceAfter,
+              destinationFundBalanceAfter,
+            };
+          }
+        }
+
+        const [firstFundId, secondFundId] = [
+          normalized.sourceFundId,
+          normalized.destinationFundId,
+        ].sort();
+
+        const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM public.funds
+          WHERE id IN (${firstFundId}::uuid, ${secondFundId}::uuid)
+            AND user_id = ${userId}::uuid
+          ORDER BY id ASC
+          FOR UPDATE
+        `;
+
+        if (lockedRows.length !== 2) {
+          throw buildNotFoundRpc('Fund not found');
+        }
+
+        const funds = await tx.fund.findMany({
+          where: {
+            id: { in: [normalized.sourceFundId, normalized.destinationFundId] },
+            userId,
+          },
+        });
+
+        const sourceFund = funds.find((fund) => fund.id.toLowerCase() === normalized.sourceFundId);
+        const destinationFund = funds.find(
+          (fund) => fund.id.toLowerCase() === normalized.destinationFundId,
+        );
+
+        if (!sourceFund || !destinationFund) {
+          throw buildNotFoundRpc('Fund not found');
+        }
+
+        if (sourceFund.isArchived || destinationFund.isArchived) {
+          throw buildConflictRpc('Cannot transfer using an archived fund');
+        }
+
+        if (sourceFund.currency !== destinationFund.currency) {
+          throw buildBadRequestRpc('Cannot transfer between funds with different currencies');
+        }
+
+        const [sourceCurrentBalance, destinationCurrentBalance] = await Promise.all([
+          this.getFundBalance(tx, userId, sourceFund.id),
+          this.getFundBalance(tx, userId, destinationFund.id),
+        ]);
+
+        const sourceSignedAmount = formatMoney(parseMoney(normalized.amount).negated());
+        const destinationSignedAmount = normalized.amount;
+
+        if (addMoney(sourceSignedAmount, destinationSignedAmount) !== '0.00') {
+          throw buildBadRequestRpc('Transfer entries must sum to zero');
+        }
+
+        const sourceFundBalanceAfter = subMoney(sourceCurrentBalance, normalized.amount);
+        const destinationFundBalanceAfter = addMoney(destinationCurrentBalance, normalized.amount);
+
+        if (!sourceFund.allowNegativeBalance && parseMoney(sourceFundBalanceAfter).lessThan(0)) {
+          throw buildConflictRpc('Insufficient balance in source fund');
+        }
+
+        const createdHeader = await tx.financialTransaction.create({
+          data: {
+            userId,
+            type: 'TRANSFER',
+            status: 'POSTED',
+            amount: normalized.amount,
+            currency: sourceFund.currency,
+            occurredOn: occurredOnDate,
+            description: normalized.description,
+            notes: normalized.notes,
+            categoryId: null,
+            idempotencyKey: normalized.idempotencyKey,
+          },
+        });
+
+        const sourceEntry = await tx.fundEntry.create({
+          data: {
+            userId,
+            transactionId: createdHeader.id,
+            fundId: sourceFund.id,
+            signedAmount: sourceSignedAmount,
+            currency: sourceFund.currency,
+            occurredOn: occurredOnDate,
+          },
+        });
+
+        const destinationEntry = await tx.fundEntry.create({
+          data: {
+            userId,
+            transactionId: createdHeader.id,
+            fundId: destinationFund.id,
+            signedAmount: destinationSignedAmount,
+            currency: destinationFund.currency,
+            occurredOn: occurredOnDate,
+          },
+        });
+
+        return {
+          transaction: toTransactionDetailView({
+            ...createdHeader,
+            fundEntries: [sourceEntry, destinationEntry],
+            transactionSplits: [],
+          }),
+          sourceFundBalanceAfter,
+          destinationFundBalanceAfter,
+        };
+      });
+    } catch (error) {
+      if (normalized.idempotencyKey !== null && isPrismaUniqueViolation(error)) {
+        const winner = await this.findByIdempotencyKey(
+          this.prisma,
+          userId,
+          normalized.idempotencyKey,
+        );
+
+        if (!winner) {
+          throw error;
+        }
+
+        if (!isIdempotentTransferEquivalent(winner, normalized)) {
+          throw buildConflictRpc('Idempotency key already used with different request parameters');
+        }
+
+        const [sourceFundBalanceAfter, destinationFundBalanceAfter] = await Promise.all([
+          this.getFundBalance(this.prisma, userId, normalized.sourceFundId),
+          this.getFundBalance(this.prisma, userId, normalized.destinationFundId),
+        ]);
+
+        return {
+          transaction: toTransactionDetailView(winner),
+          sourceFundBalanceAfter,
+          destinationFundBalanceAfter,
+        };
+      }
+
+      throw error;
+    }
+  }
+
+  async recordAdjustment(
+    context: InternalAuthContext,
+    payload: RecordAdjustmentTcpPayload,
+  ): Promise<RecordAdjustmentResponse> {
+    const userId = requireAuthenticatedUserId(context);
+    const normalized = normalizeAdjustmentPayload(payload);
+    const occurredOnDate = toLimaCalendarDateUtc(normalized.occurredOn);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        if (normalized.idempotencyKey !== null) {
+          const existing = await this.findByIdempotencyKey(tx, userId, normalized.idempotencyKey);
+          if (existing) {
+            if (!isIdempotentAdjustmentEquivalent(existing, normalized)) {
+              throw buildConflictRpc(
+                'Idempotency key already used with different request parameters',
+              );
+            }
+
+            const fundBalanceAfter = await this.getFundBalance(tx, userId, normalized.fundId);
+            return {
+              transaction: toTransactionDetailView(existing),
+              fundBalanceAfter,
+            };
+          }
+        }
+
+        const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM public.funds
+          WHERE id = ${normalized.fundId}::uuid AND user_id = ${userId}::uuid
+          FOR UPDATE
+        `;
+
+        if (lockedRows.length === 0) {
+          throw buildNotFoundRpc('Fund not found');
+        }
+
+        const fund = await tx.fund.findFirst({
+          where: {
+            id: normalized.fundId,
+            userId,
+          },
+        });
+
+        if (!fund) {
+          throw buildNotFoundRpc('Fund not found');
+        }
+
+        if (fund.isArchived) {
+          throw buildConflictRpc('Cannot record adjustment on an archived fund');
+        }
+
+        const currentBalance = await this.getFundBalance(tx, userId, fund.id);
+        const signedAmount =
+          normalized.direction === 'INCREASE'
+            ? normalized.amount
+            : formatMoney(parseMoney(normalized.amount).negated());
+        const fundBalanceAfter =
+          normalized.direction === 'INCREASE'
+            ? addMoney(currentBalance, normalized.amount)
+            : subMoney(currentBalance, normalized.amount);
+
+        if (
+          normalized.direction === 'DECREASE' &&
+          !fund.allowNegativeBalance &&
+          parseMoney(fundBalanceAfter).lessThan(0)
+        ) {
+          throw buildConflictRpc('Insufficient balance in fund');
+        }
+
+        const createdHeader = await tx.financialTransaction.create({
+          data: {
+            userId,
+            type: 'ADJUSTMENT',
+            status: 'POSTED',
+            amount: normalized.amount,
+            currency: fund.currency,
+            occurredOn: occurredOnDate,
+            description: normalized.description,
+            notes: normalized.notes,
+            categoryId: null,
+            idempotencyKey: normalized.idempotencyKey,
+          },
+        });
+
+        const createdEntry = await tx.fundEntry.create({
+          data: {
+            userId,
+            transactionId: createdHeader.id,
+            fundId: fund.id,
+            signedAmount,
+            currency: fund.currency,
+            occurredOn: occurredOnDate,
+          },
+        });
+
+        return {
+          transaction: toTransactionDetailView({
+            ...createdHeader,
+            fundEntries: [createdEntry],
+            transactionSplits: [],
+          }),
+          fundBalanceAfter,
+        };
+      });
+    } catch (error) {
+      if (normalized.idempotencyKey !== null && isPrismaUniqueViolation(error)) {
+        const winner = await this.findByIdempotencyKey(
+          this.prisma,
+          userId,
+          normalized.idempotencyKey,
+        );
+
+        if (!winner) {
+          throw error;
+        }
+
+        if (!isIdempotentAdjustmentEquivalent(winner, normalized)) {
+          throw buildConflictRpc('Idempotency key already used with different request parameters');
+        }
+
+        const fundBalanceAfter = await this.getFundBalance(this.prisma, userId, normalized.fundId);
+
+        return {
+          transaction: toTransactionDetailView(winner),
+          fundBalanceAfter,
+        };
+      }
+
+      throw error;
+    }
   }
 }

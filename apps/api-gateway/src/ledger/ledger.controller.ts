@@ -15,15 +15,21 @@ import {
   GetTransactionByIdTcpPayload,
   GetTransactionResponse,
   LEDGER_PATTERNS,
+  RecordAdjustmentResponse,
+  RecordAdjustmentTcpPayload,
   RecordTransactionResponse,
   RecordTransactionTcpPayload,
+  RecordTransferResponse,
+  RecordTransferTcpPayload,
 } from '@app/shared';
 import { Request } from 'express';
 import { AuthenticatedGatewayUser } from '../auth/auth-jwt.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CoreTcpClientService } from '../core-client/core-tcp-client.service';
+import { RecordAdjustmentDto } from './dto/record-adjustment.dto';
 import { RecordTransactionDto } from './dto/record-transaction.dto';
+import { RecordTransferDto } from './dto/record-transfer.dto';
 
 const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
 
@@ -74,6 +80,66 @@ export class LedgerController {
 
     return this.coreTcpClient.send<RecordTransactionResponse, RecordTransactionTcpPayload>(
       LEDGER_PATTERNS.RECORD_TRANSACTION,
+      payload,
+      {
+        requestId: context.requestId,
+        userId: currentUser.userId,
+      },
+    );
+  }
+
+  @Post('transfers')
+  @HttpCode(HttpStatus.CREATED)
+  recordTransfer(
+    @Body() dto: RecordTransferDto,
+    @CurrentUser() currentUser: AuthenticatedGatewayUser,
+    @Req() request: Request,
+  ): Promise<RecordTransferResponse> {
+    const idempotencyKey = extractOptionalIdempotencyKey(request);
+    const context = this.coreTcpClient.buildRequestContext(request, currentUser.userId);
+
+    const payload: RecordTransferTcpPayload = {
+      sourceFundId: dto.sourceFundId,
+      destinationFundId: dto.destinationFundId,
+      amount: dto.amount,
+      description: dto.description,
+      ...(dto.occurredOn !== undefined ? { occurredOn: dto.occurredOn } : {}),
+      ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
+      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+    };
+
+    return this.coreTcpClient.send<RecordTransferResponse, RecordTransferTcpPayload>(
+      LEDGER_PATTERNS.RECORD_TRANSFER,
+      payload,
+      {
+        requestId: context.requestId,
+        userId: currentUser.userId,
+      },
+    );
+  }
+
+  @Post('adjustments')
+  @HttpCode(HttpStatus.CREATED)
+  recordAdjustment(
+    @Body() dto: RecordAdjustmentDto,
+    @CurrentUser() currentUser: AuthenticatedGatewayUser,
+    @Req() request: Request,
+  ): Promise<RecordAdjustmentResponse> {
+    const idempotencyKey = extractOptionalIdempotencyKey(request);
+    const context = this.coreTcpClient.buildRequestContext(request, currentUser.userId);
+
+    const payload: RecordAdjustmentTcpPayload = {
+      fundId: dto.fundId,
+      direction: dto.direction,
+      amount: dto.amount,
+      description: dto.description,
+      ...(dto.occurredOn !== undefined ? { occurredOn: dto.occurredOn } : {}),
+      ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
+      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+    };
+
+    return this.coreTcpClient.send<RecordAdjustmentResponse, RecordAdjustmentTcpPayload>(
+      LEDGER_PATTERNS.RECORD_ADJUSTMENT,
       payload,
       {
         requestId: context.requestId,

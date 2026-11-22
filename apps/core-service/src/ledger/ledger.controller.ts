@@ -5,8 +5,12 @@ import {
   GetTransactionResponse,
   InternalAuthContext,
   LEDGER_PATTERNS,
+  RecordAdjustmentResponse,
+  RecordAdjustmentTcpPayload,
   RecordTransactionResponse,
   RecordTransactionTcpPayload,
+  RecordTransferResponse,
+  RecordTransferTcpPayload,
   SignedTcpEnvelope,
 } from '@app/shared';
 import { CurrentInternalContext } from '../common/decorators/current-internal-context.decorator';
@@ -22,6 +26,22 @@ export class LedgerController {
     @Payload() envelope: SignedTcpEnvelope<RecordTransactionTcpPayload>,
   ): Promise<RecordTransactionResponse> {
     return this.ledgerService.recordTransaction(context, envelope.payload);
+  }
+
+  @MessagePattern(LEDGER_PATTERNS.RECORD_TRANSFER)
+  recordTransfer(
+    @CurrentInternalContext() context: InternalAuthContext,
+    @Payload() envelope: SignedTcpEnvelope<RecordTransferTcpPayload>,
+  ): Promise<RecordTransferResponse> {
+    return this.ledgerService.recordTransfer(context, envelope.payload);
+  }
+
+  @MessagePattern(LEDGER_PATTERNS.RECORD_ADJUSTMENT)
+  recordAdjustment(
+    @CurrentInternalContext() context: InternalAuthContext,
+    @Payload() envelope: SignedTcpEnvelope<RecordAdjustmentTcpPayload>,
+  ): Promise<RecordAdjustmentResponse> {
+    return this.ledgerService.recordAdjustment(context, envelope.payload);
   }
 
   @MessagePattern(LEDGER_PATTERNS.GET_BY_ID)

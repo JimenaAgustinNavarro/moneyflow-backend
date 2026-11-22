@@ -80,7 +80,58 @@ Todo monto monetario se recibe y devuelve como `string` decimal exacto con 2 dec
 
 ---
 
-## 2. Obtener detalle de transacción (`GET /api/v1/transactions/:id`, `200 OK`)
+## 2. Registrar transferencia entre fondos (`POST /api/v1/transactions/transfers`, `201 Created`)
+
+- **TCP Pattern:** `ledger.recordTransfer` (`LEDGER_PATTERNS.RECORD_TRANSFER`)
+- **Headers opcionales:**
+  - `Idempotency-Key`: `string` (`1..128` caracteres tras `trim`).
+- **Body (`RecordTransferDto`, estricto con `forbidNonWhitelisted: true`):**
+  - `sourceFundId`: UUID válido
+  - `destinationFundId`: UUID válido (distinto de `sourceFundId`)
+  - `amount`: `string` decimal positivo exacto (`/^\d{1,12}(\.\d{1,2})?$/`, `> "0.00"` y `<= "999999999999.99"`)
+  - `occurredOn?`: `string` `YYYY-MM-DD` (calendario gregoriano estricto; default `getLimaToday()`)
+  - `description`: `string` (`1..200` caracteres tras `trim`)
+  - `notes?`: `string | null` (máx `500` caracteres tras `trim`; vacío se normaliza a `null`)
+- **Invariantes ACID:**
+  - Bloqueo pesimista en orden determinista (`ORDER BY id ASC FOR UPDATE`) sobre ambos fondos para prevenir deadlocks cruzados.
+  - Ambos fondos deben pertenecer al usuario, estar activos y compartir la misma moneda.
+  - Genera 2 asientos en `fund_entries` (`-amount` en `sourceFundId` y `+amount` en `destinationFundId`, suma neta `"0.00"`). En `entries`, el asiento de salida siempre se devuelve primero (`entries[0]`) y el de entrada segundo (`entries[1]`).
+- **Response (`201 Created`):**
+  ```json
+  {
+    "transaction": { "...TransactionDetailView (type: TRANSFER)" },
+    "sourceFundBalanceAfter": "350.00",
+    "destinationFundBalanceAfter": "350.00"
+  }
+  ```
+- **Errores:** `400 Bad Request` (mismo fondo, monedas distintas, DTO/fecha inválida), `401 Unauthorized`, `403 Forbidden`, `404 Not Found` (fondo inexistente o ajeno), `409 Conflict` (fondo archivado, saldo insuficiente en origen o conflicto de `Idempotency-Key`).
+
+---
+
+## 3. Registrar ajuste manual de saldo (`POST /api/v1/transactions/adjustments`, `201 Created`)
+
+- **TCP Pattern:** `ledger.recordAdjustment` (`LEDGER_PATTERNS.RECORD_ADJUSTMENT`)
+- **Headers opcionales:**
+  - `Idempotency-Key`: `string` (`1..128` caracteres tras `trim`).
+- **Body (`RecordAdjustmentDto`, estricto con `forbidNonWhitelisted: true`):**
+  - `fundId`: UUID válido
+  - `direction`: `'INCREASE' | 'DECREASE'`
+  - `amount`: `string` decimal positivo exacto (`> "0.00"` y `<= "999999999999.99"`)
+  - `occurredOn?`: `string` `YYYY-MM-DD` (default `getLimaToday()`)
+  - `description`: `string` (`1..200` caracteres tras `trim`)
+  - `notes?`: `string | null` (máx `500` caracteres tras `trim`)
+- **Response (`201 Created`):**
+  ```json
+  {
+    "transaction": { "...TransactionDetailView (type: ADJUSTMENT)" },
+    "fundBalanceAfter": "145.25"
+  }
+  ```
+- **Errores:** `400 Bad Request`, `401 Unauthorized`, `403 Forbidden`, `404 Not Found`, `409 Conflict` (fondo archivado, saldo insuficiente cuando `direction === 'DECREASE'` y `allowNegativeBalance = false`, o conflicto de `Idempotency-Key`).
+
+---
+
+## 4. Obtener detalle de transacción (`GET /api/v1/transactions/:id`, `200 OK`)
 
 - **TCP Pattern:** `ledger.getById` (`LEDGER_PATTERNS.GET_BY_ID`)
 - **Params:** `:id` (UUID validado por `ParseUUIDPipe`)

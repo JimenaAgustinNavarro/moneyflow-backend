@@ -25,7 +25,7 @@ import {
 } from 'class-validator';
 
 const TRANSACTION_TYPES: readonly RecordableTransactionType[] = ['INCOME', 'EXPENSE'];
-const POSITIVE_MONEY_REGEX = /^\d{1,12}(\.\d{1,2})?$/;
+export const POSITIVE_MONEY_REGEX = /^\d{1,12}(\.\d{1,2})?$/;
 const MAX_DECIMAL_14_2 = '999999999999.99';
 const MAX_SPLITS_COUNT = 50;
 
@@ -42,7 +42,7 @@ function isPositiveMoneyInRange(value: unknown): boolean {
   }
 }
 
-function IsPositiveMoneyString(validationOptions?: ValidationOptions): PropertyDecorator {
+export function IsPositiveMoneyString(validationOptions?: ValidationOptions): PropertyDecorator {
   return (object: object, propertyName: string | symbol) => {
     registerDecorator({
       name: 'isPositiveMoneyString',
@@ -61,7 +61,7 @@ function IsPositiveMoneyString(validationOptions?: ValidationOptions): PropertyD
   };
 }
 
-function IsGregorianDateString(validationOptions?: ValidationOptions): PropertyDecorator {
+export function IsGregorianDateString(validationOptions?: ValidationOptions): PropertyDecorator {
   return (object: object, propertyName: string | symbol) => {
     registerDecorator({
       name: 'isGregorianDateString',
@@ -149,7 +149,7 @@ function IsSplitsSumEqualAmount(validationOptions?: ValidationOptions): Property
   };
 }
 
-function trimOptionalNullableString(value: unknown): unknown {
+export function trimOptionalNullableString(value: unknown): unknown {
   if (typeof value !== 'string') {
     return value;
   }

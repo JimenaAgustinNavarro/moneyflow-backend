@@ -2,10 +2,14 @@ import { FundCurrencyCode } from './funds.contract';
 
 export const LEDGER_PATTERNS = {
   RECORD_TRANSACTION: 'ledger.recordTransaction',
+  RECORD_TRANSFER: 'ledger.recordTransfer',
+  RECORD_ADJUSTMENT: 'ledger.recordAdjustment',
   GET_BY_ID: 'ledger.getById',
 } as const;
 
 export type RecordableTransactionType = 'INCOME' | 'EXPENSE';
+
+export type AdjustmentDirection = 'INCREASE' | 'DECREASE';
 
 export type TransactionTypeValue =
   'INCOME' | 'EXPENSE' | 'TRANSFER' | 'ADJUSTMENT' | 'VOID' | 'REFUND';
@@ -32,6 +36,26 @@ export interface RecordTransactionTcpPayload {
 
 export interface GetTransactionByIdTcpPayload {
   id: string;
+}
+
+export interface RecordTransferTcpPayload {
+  sourceFundId: string;
+  destinationFundId: string;
+  amount: string;
+  occurredOn?: string;
+  description: string;
+  notes?: string | null;
+  idempotencyKey?: string;
+}
+
+export interface RecordAdjustmentTcpPayload {
+  fundId: string;
+  direction: AdjustmentDirection;
+  amount: string;
+  occurredOn?: string;
+  description: string;
+  notes?: string | null;
+  idempotencyKey?: string;
 }
 
 export interface FundEntryView {
@@ -74,6 +98,17 @@ export interface TransactionDetailView extends TransactionView {
 }
 
 export interface RecordTransactionResponse {
+  transaction: TransactionDetailView;
+  fundBalanceAfter: string;
+}
+
+export interface RecordTransferResponse {
+  transaction: TransactionDetailView;
+  sourceFundBalanceAfter: string;
+  destinationFundBalanceAfter: string;
+}
+
+export interface RecordAdjustmentResponse {
   transaction: TransactionDetailView;
   fundBalanceAfter: string;
 }
