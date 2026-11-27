@@ -167,6 +167,7 @@ export interface VoidTransactionResponse {
   originalTransactionId: string;
   originalStatus: 'VOIDED';
   affectedFundBalances: AffectedFundBalanceView[];
+  revertedRecurringOccurrenceId?: string;
 }
 
 export interface RefundTransactionResponse {

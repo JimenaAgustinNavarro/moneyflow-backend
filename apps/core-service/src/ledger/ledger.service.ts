@@ -1565,11 +1565,22 @@ export class LedgerService {
       })),
     );
 
+    const linkedVoidedOccurrence = await db.recurringOccurrence.findFirst({
+      where: {
+        lastVoidedTransactionId: original.id,
+        userId,
+      },
+      select: { id: true },
+    });
+
     return {
       voidTransaction: toTransactionDetailView(existing),
       originalTransactionId: original.id,
       originalStatus: 'VOIDED',
       affectedFundBalances,
+      ...(linkedVoidedOccurrence
+        ? { revertedRecurringOccurrenceId: linkedVoidedOccurrence.id }
+        : {}),
     };
   }
 
@@ -1642,6 +1653,14 @@ export class LedgerService {
         if (original.fundEntries.length === 0) {
           throw buildBadRequestRpc('Original transaction has no fund entries to void');
         }
+
+        // DAG Level (3): recurring_occurrences FOR UPDATE (antes de Nivel 4 funds)
+        const lockedLinkedOccurrences = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM public.recurring_occurrences
+          WHERE paid_transaction_id = ${original.id}::uuid AND user_id = ${userId}::uuid
+          FOR UPDATE
+        `;
 
         const uniqueFundIds = Array.from(
           new Set(original.fundEntries.map((entry) => entry.fundId.toLowerCase())),
@@ -1762,6 +1781,23 @@ export class LedgerService {
           createdCounterEntries.push(createdEntry);
         }
 
+        let revertedRecurringOccurrenceId: string | undefined;
+        if (lockedLinkedOccurrences.length > 0) {
+          revertedRecurringOccurrenceId = lockedLinkedOccurrences[0].id;
+          await tx.recurringOccurrence.update({
+            where: { id: revertedRecurringOccurrenceId },
+            data: {
+              status: 'PENDING',
+              paidTransactionId: null,
+              paidAmount: null,
+              paidAt: null,
+              skippedAt: null,
+              lastVoidedTransactionId: original.id,
+              lastVoidedAt: new Date(),
+            },
+          });
+        }
+
         return {
           voidTransaction: toTransactionDetailView({
             ...createdVoidHeader,
@@ -1771,6 +1807,7 @@ export class LedgerService {
           originalTransactionId: original.id,
           originalStatus: 'VOIDED',
           affectedFundBalances,
+          ...(revertedRecurringOccurrenceId !== undefined ? { revertedRecurringOccurrenceId } : {}),
         };
       });
     } catch (error) {

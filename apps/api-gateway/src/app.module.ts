@@ -8,6 +8,7 @@ import { OriginCsrfGuard } from './common/guards/origin-csrf.guard';
 import { FundsModule } from './funds/funds.module';
 import { HealthModule } from './health/health.module';
 import { LedgerModule } from './ledger/ledger.module';
+import { PlanningModule } from './planning/planning.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { LedgerModule } from './ledger/ledger.module';
     CategoriesModule,
     FundsModule,
     LedgerModule,
+    PlanningModule,
   ],
   providers: [
     {

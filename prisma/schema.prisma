@@ -49,6 +49,8 @@ model User {
   financialTransactions FinancialTransaction[]
   fundEntries           FundEntry[]
   transactionSplits     TransactionSplit[]
+  recurringRules        RecurringRule[]
+  recurringOccurrences  RecurringOccurrence[]
 
   @@map("users")
 }
@@ -175,8 +177,9 @@ model Fund {
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  user                 User         @relation(fields: [userId], references: [id], onDelete: Restrict)
-  fundEntries          FundEntry[]
+  user                     User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  fundEntries              FundEntry[]
+  defaultForRecurringRules RecurringRule[]
 
   @@unique([id, userId], map: "funds_id_user_id_key")
   @@unique([id, userId, currency], map: "funds_id_user_id_currency_key")
@@ -205,6 +208,7 @@ model Category {
   user                  User?                  @relation(fields: [userId], references: [id], onDelete: Restrict)
   financialTransactions FinancialTransaction[]
   transactionSplits     TransactionSplit[]
+  recurringRules        RecurringRule[]
 
   @@index([userId, kind, isArchived], map: "categories_user_id_kind_is_archived_idx")
   @@map("categories")
@@ -238,10 +242,12 @@ model FinancialTransaction {
 
   user                 User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
   category             Category?              @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  relatedTransaction   FinancialTransaction?  @relation("TransactionRelation", fields: [relatedTransactionId], references: [id], onDelete: Restrict)
-  childTransactions    FinancialTransaction[] @relation("TransactionRelation")
-  fundEntries          FundEntry[]
-  transactionSplits    TransactionSplit[]
+  relatedTransaction         FinancialTransaction?  @relation("TransactionRelation", fields: [relatedTransactionId], references: [id], onDelete: Restrict)
+  childTransactions          FinancialTransaction[] @relation("TransactionRelation")
+  fundEntries                FundEntry[]
+  transactionSplits          TransactionSplit[]
+  paidRecurringOccurrence    RecurringOccurrence?   @relation("OccurrencePaidTransaction")
+  voidedRecurringOccurrences RecurringOccurrence[]  @relation("OccurrenceLastVoidedTransaction")
 
   @@unique([id, userId], map: "financial_transactions_id_user_id_key")
   @@unique([id, userId, currency], map: "financial_transactions_id_user_id_currency_key")
@@ -297,4 +303,88 @@ model TransactionSplit {
   @@index([transactionId], map: "transaction_splits_transaction_id_idx")
   @@index([userId, categoryId], map: "transaction_splits_user_id_category_id_idx")
   @@map("transaction_splits")
+}
+
+// ============================================================================
+// Obligaciones Recurrentes (MF-023)
+// Fuente de verdad de CHECK constraints, índices parciales (WHERE ...) y
+// FKs compuestas de aislamiento (user_id + currency): db/migrations/0005_recurring_obligations.sql
+// ============================================================================
+
+enum RecurringFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  YEARLY
+
+  @@map("recurring_frequency")
+}
+
+enum RecurringOccurrenceStatus {
+  PENDING
+  PAID
+  SKIPPED
+
+  @@map("recurring_occurrence_status")
+}
+
+/// Regla de obligación recurrente (ingreso o egreso). kind y currency son inmutables tras creación.
+model RecurringRule {
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String                @map("user_id") @db.Uuid
+  name          String                @db.VarChar(120)
+  kind          CategoryKind
+  amount        Decimal               @db.Decimal(14, 2)
+  currency      CurrencyCode
+  frequency     RecurringFrequency
+  startDate     DateTime              @map("start_date") @db.Date
+  endDate       DateTime?             @map("end_date") @db.Date
+  anchorDay     Int                   @map("anchor_day") @db.SmallInt
+  categoryId    String                @map("category_id") @db.Uuid
+  defaultFundId String?               @map("default_fund_id") @db.Uuid
+  notes         String?               @db.VarChar(500)
+  isActive      Boolean               @default(true) @map("is_active")
+  isArchived    Boolean               @default(false) @map("is_archived")
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category      Category              @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  defaultFund   Fund?                 @relation(fields: [defaultFundId], references: [id], onDelete: Restrict)
+  occurrences   RecurringOccurrence[]
+
+  @@unique([id, userId], map: "recurring_rules_id_user_id_key")
+  @@unique([id, userId, currency], map: "recurring_rules_id_user_id_currency_key")
+  @@index([userId, isArchived, isActive], map: "recurring_rules_user_id_archived_active_idx")
+  @@index([userId, categoryId], map: "recurring_rules_user_id_category_id_idx")
+  @@map("recurring_rules")
+}
+
+/// Ocurrencia materializada de una obligación recurrente dentro del horizonte móvil.
+model RecurringOccurrence {
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                  String                    @map("user_id") @db.Uuid
+  ruleId                  String                    @map("rule_id") @db.Uuid
+  scheduledDate           DateTime                  @map("scheduled_date") @db.Date
+  expectedAmount          Decimal                   @map("expected_amount") @db.Decimal(14, 2)
+  currency                CurrencyCode
+  status                  RecurringOccurrenceStatus @default(PENDING)
+  paidTransactionId       String?                   @unique(map: "recurring_occurrences_paid_transaction_id_uidx") @map("paid_transaction_id") @db.Uuid
+  paidAmount              Decimal?                  @map("paid_amount") @db.Decimal(14, 2)
+  paidAt                  DateTime?                 @map("paid_at") @db.Timestamptz(6)
+  skippedAt               DateTime?                 @map("skipped_at") @db.Timestamptz(6)
+  lastVoidedTransactionId String?                   @map("last_voided_transaction_id") @db.Uuid
+  lastVoidedAt            DateTime?                 @map("last_voided_at") @db.Timestamptz(6)
+  createdAt               DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user                    User                      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  rule                    RecurringRule             @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  paidTransaction         FinancialTransaction?     @relation("OccurrencePaidTransaction", fields: [paidTransactionId], references: [id], onDelete: Restrict)
+  lastVoidedTransaction   FinancialTransaction?     @relation("OccurrenceLastVoidedTransaction", fields: [lastVoidedTransactionId], references: [id], onDelete: Restrict)
+
+  @@unique([ruleId, scheduledDate], map: "recurring_occurrences_rule_scheduled_date_key")
+  @@index([userId, scheduledDate(sort: Asc), status], map: "recurring_occurrences_user_id_scheduled_date_status_idx")
+  @@index([ruleId, status, scheduledDate(sort: Asc)], map: "recurring_occurrences_rule_id_status_scheduled_date_idx")
+  @@map("recurring_occurrences")
 }

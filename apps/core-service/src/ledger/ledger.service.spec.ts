@@ -1,4 +1,4 @@
-import { InternalAuthContext } from '@app/shared';
+﻿import { InternalAuthContext } from '@app/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { LedgerService } from './ledger.service';
 
@@ -36,6 +36,7 @@ describe('LedgerService', () => {
       update: jest.Mock;
     };
     transactionSplit: { create: jest.Mock };
+    recurringOccurrence: { findFirst: jest.Mock; update: jest.Mock };
     $queryRaw: jest.Mock;
     $transaction: jest.Mock;
   };
@@ -56,6 +57,7 @@ describe('LedgerService', () => {
         update: jest.fn(),
       },
       transactionSplit: { create: jest.fn() },
+      recurringOccurrence: { findFirst: jest.fn(), update: jest.fn() },
       $queryRaw: jest.fn(),
       $transaction: jest.fn(),
     };
@@ -1080,6 +1082,7 @@ describe('LedgerService', () => {
     // 1) Void EXPENSE with default reason
     prismaMock.$queryRaw
       .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: fundId }]);
     prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
       id: txId,
@@ -1159,6 +1162,7 @@ describe('LedgerService', () => {
     // 2) Void TRANSFER: locks funds sorted ascending, orders VOID entries negative-first and affectedFundBalances by fundId asc
     prismaMock.$queryRaw
       .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: destFundId }, { id: fundId }]);
     prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
       id: txId,
@@ -1337,6 +1341,7 @@ describe('LedgerService', () => {
     // 6) Overdraft when voiding INCOME with allowNegativeBalance=false -> 409
     prismaMock.$queryRaw
       .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: fundId }]);
     prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
       id: txId,
@@ -1791,6 +1796,196 @@ describe('LedgerService', () => {
       totalExpenseNet: '0.00',
       netCashFlow: '500.00',
       transactionCount: 1,
+    });
+  });
+
+  it('voidTransaction atomically reverts PAID recurring occurrence to PENDING', async () => {
+    const occurrenceId = '99999999-1111-4111-8111-111111111111';
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([{ id: occurrenceId }])
+      .mockResolvedValueOnce([{ id: fundId }]);
+
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'EXPENSE',
+      status: 'POSTED',
+      amount: { toString: () => '1500.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      recordedAt: baseNow,
+      description: 'Alquiler',
+      notes: null,
+      categoryId: catExpenseId1,
+      relatedTransactionId: null,
+      idempotencyKey: null,
+      createdAt: baseNow,
+      updatedAt: baseNow,
+      fundEntries: [
+        {
+          id: entryId,
+          fundId,
+          signedAmount: { toString: () => '-1500.00' },
+          currency: 'PEN',
+          occurredOn: limaDate,
+          createdAt: baseNow,
+        },
+      ],
+    });
+    prismaMock.financialTransaction.count.mockResolvedValueOnce(0);
+    prismaMock.fund.findMany.mockResolvedValueOnce([
+      {
+        id: fundId,
+        userId: userA,
+        currency: 'PEN',
+        allowNegativeBalance: false,
+        isArchived: false,
+      },
+    ]);
+    prismaMock.fundEntry.aggregate.mockResolvedValueOnce({
+      _sum: { signedAmount: { toString: () => '3500.00' } },
+    });
+    prismaMock.financialTransaction.update.mockResolvedValueOnce({ id: txId, status: 'VOIDED' });
+    prismaMock.financialTransaction.create.mockResolvedValueOnce({
+      id: '77777777-1111-4111-8111-111111111111',
+      type: 'VOID',
+      status: 'POSTED',
+      amount: { toString: () => '1500.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      recordedAt: baseNow,
+      description: 'Anulación: Alquiler',
+      notes: null,
+      categoryId: catExpenseId1,
+      relatedTransactionId: txId,
+      idempotencyKey: null,
+      createdAt: baseNow,
+      updatedAt: baseNow,
+    });
+    prismaMock.fundEntry.create.mockResolvedValueOnce({
+      id: '88888888-2222-4222-8222-222222222222',
+      fundId,
+      signedAmount: { toString: () => '1500.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      createdAt: baseNow,
+    });
+    prismaMock.recurringOccurrence.update.mockResolvedValueOnce({ id: occurrenceId });
+
+    const result = await service.voidTransaction(contextA, {
+      id: txId,
+      occurredOn: '2026-11-22',
+    });
+
+    expect(result.revertedRecurringOccurrenceId).toBe(occurrenceId);
+    const updateCall = (
+      prismaMock.recurringOccurrence.update.mock.calls as unknown[][]
+    )[0]?.[0] as {
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    };
+    expect(updateCall.where).toEqual({ id: occurrenceId });
+    expect(updateCall.data).toMatchObject({
+      status: 'PENDING',
+      paidTransactionId: null,
+      paidAmount: null,
+      paidAt: null,
+      lastVoidedTransactionId: txId,
+    });
+  });
+
+  it('voidTransaction does not mutate recurring occurrence when void fails', async () => {
+    const occurrenceId = '99999999-1111-4111-8111-111111111111';
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: txId }])
+      .mockResolvedValueOnce([{ id: occurrenceId }])
+      .mockResolvedValueOnce([{ id: fundId }]);
+
+    prismaMock.financialTransaction.findFirst.mockResolvedValueOnce({
+      id: txId,
+      type: 'INCOME',
+      status: 'POSTED',
+      amount: { toString: () => '500.00' },
+      currency: 'PEN',
+      occurredOn: limaDate,
+      description: 'Ingreso',
+      fundEntries: [
+        { id: entryId, fundId, signedAmount: { toString: () => '500.00' }, currency: 'PEN' },
+      ],
+    });
+    prismaMock.financialTransaction.count.mockResolvedValueOnce(0);
+    prismaMock.fund.findMany.mockResolvedValueOnce([
+      {
+        id: fundId,
+        userId: userA,
+        currency: 'PEN',
+        allowNegativeBalance: false,
+        isArchived: false,
+      },
+    ]);
+    prismaMock.fundEntry.aggregate.mockResolvedValueOnce({
+      _sum: { signedAmount: { toString: () => '100.00' } },
+    });
+
+    await expect(
+      service.voidTransaction(contextA, { id: txId, occurredOn: '2026-11-22' }),
+    ).rejects.toMatchObject({ error: { statusCode: 409 } });
+
+    expect(prismaMock.recurringOccurrence.update).not.toHaveBeenCalled();
+  });
+
+  it('resolveIdempotentVoidResponse looks up linked occurrence by lastVoidedTransactionId', async () => {
+    const voidTxId = '77777777-2222-4222-8222-222222222222';
+    const occurrenceId = '99999999-2222-4222-8222-222222222222';
+
+    prismaMock.financialTransaction.findFirst
+      .mockResolvedValueOnce({
+        id: voidTxId,
+        type: 'VOID',
+        relatedTransactionId: txId,
+        occurredOn: limaDate,
+        description: 'Anulación: Alquiler',
+        notes: null,
+        amount: { toString: () => '1500.00' },
+        currency: 'PEN',
+        status: 'POSTED',
+        recordedAt: baseNow,
+        categoryId: null,
+        idempotencyKey: 'void-idem-key',
+        createdAt: baseNow,
+        updatedAt: baseNow,
+        fundEntries: [
+          {
+            id: 'e1',
+            fundId,
+            signedAmount: { toString: () => '1500.00' },
+            currency: 'PEN',
+            occurredOn: limaDate,
+            createdAt: baseNow,
+          },
+        ],
+        transactionSplits: [],
+      })
+      .mockResolvedValueOnce({ id: txId, description: 'Alquiler' });
+    prismaMock.fundEntry.aggregate.mockResolvedValueOnce({
+      _sum: { signedAmount: { toString: () => '5000.00' } },
+    });
+    prismaMock.recurringOccurrence.findFirst.mockResolvedValueOnce({ id: occurrenceId });
+
+    const result = await service.voidTransaction(contextA, {
+      id: txId,
+      idempotencyKey: 'void-idem-key',
+      occurredOn: '2026-11-22',
+    });
+
+    expect(result.revertedRecurringOccurrenceId).toBe(occurrenceId);
+    const findFirstCall = (
+      prismaMock.recurringOccurrence.findFirst.mock.calls as unknown[][]
+    )[0]?.[0] as {
+      where: Record<string, unknown>;
+    };
+    expect(findFirstCall.where).toMatchObject({
+      lastVoidedTransactionId: txId,
     });
   });
 });

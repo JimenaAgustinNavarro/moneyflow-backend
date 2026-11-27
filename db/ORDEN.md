@@ -20,6 +20,7 @@ Control estricto y auditable de scripts SQL versionados ejecutados sobre `moneyf
 | `0002` | `0002_auth_identity.sql` | `MF-005` | `2026-11-21` | `0001` | `C189582A612BD6FDDD190508FB6681D0E7E0F0F3C039B3047EEF3007F7982082` | Aplicada |
 | `0003` | `0003_financial_core.sql` | `MF-011` | `2026-11-22` | `0002` | `079D04D90F4AFF857F7D76F31DDDDEF164B630933D23C7990F30CB3FB992EF2E` | Aplicada |
 | `0004` | `0004_seed_system_categories.sql` | `MF-012` | `2026-11-22` | `0003` | `A14DDA2DADEFF92405C8B8E86B614230A612BDE2F9FA6C2ECA9E64C70D8083FA` | Aplicada |
+| `0005` | `0005_recurring_obligations.sql` | `MF-023` | `2026-11-27` | `0003` | `C58114AC9810764F261DF1DEFB6A289D697DAD8332430027C4A3955DEABC1B21` | Pendiente de aplicar en `moneyflow-postgres` |
 
 ---
 
@@ -108,5 +109,26 @@ Control estricto y auditable de scripts SQL versionados ejecutados sobre `moneyf
 - **Rollback:**
   ```sql
   DELETE FROM public.categories WHERE is_system = TRUE;
+  ```
+
+### `0005_recurring_obligations.sql`
+- **Motivo:** Crear los tipos enum `recurring_frequency` y `recurring_occurrence_status`, y las tablas `recurring_rules` y `recurring_occurrences` con aislamiento compuesto `(id, user_id, currency)`, FKs compuestas hacia `funds` y `financial_transactions`, constraints de estado e índices parciales para el módulo de Obligaciones Recurrentes (`planning`).
+- **Dependencias:** `0003_financial_core.sql` aplicada (`public.users`, `public.categories`, `public.funds`, `public.financial_transactions`, `category_kind`, `currency_code` y `set_updated_at_timestamp()`).
+- **Comando de ejecución:**
+  ```powershell
+  Get-Content db/migrations/0005_recurring_obligations.sql -Raw | docker exec -i moneyflow-postgres psql -U postgres -d moneyflow_dev -v ON_ERROR_STOP=1
+  ```
+- **Validación:**
+  ```powershell
+  docker exec -i moneyflow-postgres psql -U postgres -d moneyflow_dev -c "\d public.recurring_rules" -c "\d public.recurring_occurrences"
+  ```
+- **Rollback:**
+  ```sql
+  DROP TRIGGER IF EXISTS trg_recurring_occurrences_set_updated_at ON public.recurring_occurrences;
+  DROP TRIGGER IF EXISTS trg_recurring_rules_set_updated_at ON public.recurring_rules;
+  DROP TABLE IF EXISTS public.recurring_occurrences;
+  DROP TABLE IF EXISTS public.recurring_rules;
+  DROP TYPE IF EXISTS public.recurring_occurrence_status;
+  DROP TYPE IF EXISTS public.recurring_frequency;
   ```
 
